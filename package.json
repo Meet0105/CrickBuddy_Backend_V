@@ -9,6 +9,7 @@
     "sync": "ts-node src/utils/syncAllData.ts"
   },
   "dependencies": {
+    "@vercel/node": "^5.3.24",
     "axios": "^1.4.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
