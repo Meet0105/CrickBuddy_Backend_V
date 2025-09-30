@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const venueController_1 = require("../controllers/venueController");
+const router = (0, express_1.Router)();
+router.get('/', venueController_1.getAllVenues);
+router.get('/:id', venueController_1.getVenueById);
+router.get('/:id/info', venueController_1.getVenueInfo);
+router.get('/:id/stats', venueController_1.getVenueStats);
+router.get('/:id/matches', venueController_1.getVenueMatches);
+router.post('/sync', venueController_1.syncVenuesFromRapidAPI);
+exports.default = router;

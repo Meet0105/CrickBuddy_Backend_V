@@ -1,0 +1,22 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getNewsPhotoGallery = exports.getNewsByTopicId = exports.getNewsTopics = exports.getNewsCategories = exports.getNewsByCategoryId = exports.syncNewsFromRapidAPI = exports.searchNews = exports.getNewsByCategory = exports.getFeaturedNews = exports.getBreakingNews = exports.getNewsById = exports.getAllNews = void 0;
+// Import all the component functions
+const newsCore_1 = require("./news/newsCore");
+Object.defineProperty(exports, "getAllNews", { enumerable: true, get: function () { return newsCore_1.getAllNews; } });
+Object.defineProperty(exports, "getNewsById", { enumerable: true, get: function () { return newsCore_1.getNewsById; } });
+const newsDisplay_1 = require("./news/newsDisplay");
+Object.defineProperty(exports, "getBreakingNews", { enumerable: true, get: function () { return newsDisplay_1.getBreakingNews; } });
+Object.defineProperty(exports, "getFeaturedNews", { enumerable: true, get: function () { return newsDisplay_1.getFeaturedNews; } });
+Object.defineProperty(exports, "getNewsByCategory", { enumerable: true, get: function () { return newsDisplay_1.getNewsByCategory; } });
+Object.defineProperty(exports, "searchNews", { enumerable: true, get: function () { return newsDisplay_1.searchNews; } });
+const newsSync_1 = require("./news/newsSync");
+Object.defineProperty(exports, "syncNewsFromRapidAPI", { enumerable: true, get: function () { return newsSync_1.syncNewsFromRapidAPI; } });
+const newsCategory_1 = require("./news/newsCategory");
+Object.defineProperty(exports, "getNewsByCategoryId", { enumerable: true, get: function () { return newsCategory_1.getNewsByCategoryId; } });
+Object.defineProperty(exports, "getNewsCategories", { enumerable: true, get: function () { return newsCategory_1.getNewsCategories; } });
+const newsTopic_1 = require("./news/newsTopic");
+Object.defineProperty(exports, "getNewsTopics", { enumerable: true, get: function () { return newsTopic_1.getNewsTopics; } });
+Object.defineProperty(exports, "getNewsByTopicId", { enumerable: true, get: function () { return newsTopic_1.getNewsByTopicId; } });
+const newsPhoto_1 = require("./news/newsPhoto");
+Object.defineProperty(exports, "getNewsPhotoGallery", { enumerable: true, get: function () { return newsPhoto_1.getNewsPhotoGallery; } });
