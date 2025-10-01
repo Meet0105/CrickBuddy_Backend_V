@@ -16,7 +16,7 @@ dotenv.config({ path: __dirname + '/../.env' });
 
 const app = express();
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001'],
+  origin: ['http://localhost:3000', 'https://crick-buddy-frontend-v.vercel.app'],
   credentials: true
 }));
 app.use(express.json({ limit: '2mb' }));

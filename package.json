@@ -2,6 +2,9 @@
   "name": "cricbuzz-backend-ts",
   "version": "1.0.0",
   "main": "dist/server.js",
+  "engines": {
+    "node": "18.x"
+  },
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc -p tsconfig.json",
