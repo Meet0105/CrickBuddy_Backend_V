@@ -19,20 +19,25 @@ const app = express();
 // ✅ Allowed origins
 const allowedOrigins: string[] = [
   'http://localhost:3000',                  // local frontend
-  'https://crick-buddy-frontend-v.vercel.app' // deployed frontend
+  'https://crick-buddy-frontend-v.vercel.app', // deployed frontend
+  'https://crick-buddy-backend-v.vercel.app'   // backend URL (for self-referencing)
 ];
 
 // ✅ CORS options
 const corsOptions: CorsOptions = {
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Allow all origins in development
+    if (process.env.NODE_ENV === 'development') {
+      callback(null, true);
+    } else if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 };
 
 app.use(cors(corsOptions));
