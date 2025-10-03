@@ -113,6 +113,9 @@ const processMatchData = (match, status = 'UPCOMING') => {
             overs: scoreData.overs || 0,
             runRate: scoreData.runRate || (scoreData.runs && scoreData.overs ? parseFloat((scoreData.runs / scoreData.overs).toFixed(2)) : 0)
           };
+          
+          // Debug log for troubleshooting
+          console.log(`🔍 Extracted score for team ${teamIndex + 1}:`, score);
         }
       }
     }
