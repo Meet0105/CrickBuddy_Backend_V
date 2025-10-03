@@ -47,17 +47,20 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
 
         // Process API response and save to database
         if (response && response.typeMatches) {
-          const upcomingMatchesData = response.typeMatches.find((type: any) =>
-            type.matchType === 'Upcoming Matches'
-          );
+          // Process all match types (International, Domestic, Women) instead of looking for 'Upcoming Matches'
+          const allMatchTypes = response.typeMatches;
 
-          if (upcomingMatchesData && upcomingMatchesData.seriesMatches) {
+          if (allMatchTypes && allMatchTypes.length > 0) {
             const matchesList: any[] = [];
 
-            // Extract matches from series
-            for (const seriesMatch of upcomingMatchesData.seriesMatches) {
-              if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
-                matchesList.push(...seriesMatch.seriesAdWrapper.matches);
+            // Extract matches from all match types (International, Domestic, Women)
+            for (const matchType of allMatchTypes) {
+              if (matchType.seriesMatches) {
+                for (const seriesMatch of matchType.seriesMatches) {
+                  if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
+                    matchesList.push(...seriesMatch.seriesAdWrapper.matches);
+                  }
+                }
               }
             }
 

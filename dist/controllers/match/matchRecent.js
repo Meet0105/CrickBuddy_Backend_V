@@ -81,13 +81,18 @@ const getRecentMatches = async (req, res) => {
                 const response = await rapidApiRateLimiter.makeRequest(RAPIDAPI_MATCHES_RECENT_URL, { headers });
                 // Process API response and save to database
                 if (response && response.typeMatches) {
-                    const recentMatchesData = response.typeMatches.find((type) => type.matchType === 'Recent Matches');
-                    if (recentMatchesData && recentMatchesData.seriesMatches) {
+                    // Process all match types (International, Domestic, Women) instead of looking for 'Recent Matches'
+                    const allMatchTypes = response.typeMatches;
+                    if (allMatchTypes && allMatchTypes.length > 0) {
                         const matchesList = [];
-                        // Extract matches from series
-                        for (const seriesMatch of recentMatchesData.seriesMatches) {
-                            if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
-                                matchesList.push(...seriesMatch.seriesAdWrapper.matches);
+                        // Extract matches from all match types (International, Domestic, Women)
+                        for (const matchType of allMatchTypes) {
+                            if (matchType.seriesMatches) {
+                                for (const seriesMatch of matchType.seriesMatches) {
+                                    if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
+                                        matchesList.push(...seriesMatch.seriesAdWrapper.matches);
+                                    }
+                                }
                             }
                         }
                         // Process and save each match

@@ -47,17 +47,20 @@ export const getRecentMatches = async (req: Request, res: Response) => {
 
         // Process API response and save to database
         if (response && response.typeMatches) {
-          const recentMatchesData = response.typeMatches.find((type: any) => 
-            type.matchType === 'Recent Matches'
-          );
+          // Process all match types (International, Domestic, Women) instead of looking for 'Recent Matches'
+          const allMatchTypes = response.typeMatches;
 
-          if (recentMatchesData && recentMatchesData.seriesMatches) {
+          if (allMatchTypes && allMatchTypes.length > 0) {
             const matchesList: any[] = [];
             
-            // Extract matches from series
-            for (const seriesMatch of recentMatchesData.seriesMatches) {
-              if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
-                matchesList.push(...seriesMatch.seriesAdWrapper.matches);
+            // Extract matches from all match types (International, Domestic, Women)
+            for (const matchType of allMatchTypes) {
+              if (matchType.seriesMatches) {
+                for (const seriesMatch of matchType.seriesMatches) {
+                  if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
+                    matchesList.push(...seriesMatch.seriesAdWrapper.matches);
+                  }
+                }
               }
             }
 
