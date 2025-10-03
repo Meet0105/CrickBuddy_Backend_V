@@ -96,29 +96,12 @@ const processMatchData = (match, status = 'UPCOMING') => {
             runs: teamScore.inngs1.runs || 0,
             wickets: teamScore.inngs1.wickets || 0,
             overs: teamScore.inngs1.overs || 0,
-            runRate: teamScore.inngs1.runRate || (teamScore.inngs1.runs && teamScore.inngs1.overs ? (teamScore.inngs1.runs / teamScore.inngs1.overs).toFixed(2) : 0)
+            runRate: teamScore.inngs1.runRate || (teamScore.inngs1.runs && teamScore.inngs1.overs ? parseFloat((teamScore.inngs1.runs / teamScore.inngs1.overs).toFixed(2)) : 0)
           };
         }
       }
 
-      // Fallback: Add sample scores for demonstration if no real scores found
-      if (score.runs === 0 && score.wickets === 0) {
-        if (status === 'LIVE') {
-          // Sample live scores
-          const sampleScores = [
-            { runs: 156, wickets: 3, overs: 18.4, runRate: 8.48 },
-            { runs: 89, wickets: 2, overs: 12.1, runRate: 7.34 }
-          ];
-          score = sampleScores[teamIndex] || score;
-        } else if (status === 'COMPLETED') {
-          // Sample completed match scores
-          const sampleScores = [
-            { runs: 184, wickets: 6, overs: 20.0, runRate: 9.20 },
-            { runs: 178, wickets: 8, overs: 20.0, runRate: 8.90 }
-          ];
-          score = sampleScores[teamIndex] || score;
-        }
-      }
+      // If no score found, keep as zeros - no sample data
     }
 
     return score;
