@@ -216,6 +216,307 @@ app.get('/api/matches', async (req, res) => {
   }
 });
 
+// Series endpoints
+app.get('/api/series', async (req, res) => {
+  try {
+    await connectDB();
+    
+    // For now, return placeholder series data
+    const series = [
+      {
+        id: 'aus-nz-2025',
+        name: 'Australia vs New Zealand ODI Series 2025',
+        seriesType: 'BILATERAL',
+        startDate: new Date('2025-02-15'),
+        endDate: new Date('2025-02-25')
+      },
+      {
+        id: 'ind-eng-2025', 
+        name: 'India vs England T20I Series 2025',
+        seriesType: 'BILATERAL',
+        startDate: new Date('2025-02-18'),
+        endDate: new Date('2025-02-28')
+      }
+    ];
+    
+    res.json(series);
+  } catch (error) {
+    console.error('Series error:', error);
+    res.status(500).json({ error: 'Failed to fetch series' });
+  }
+});
+
+app.get('/api/series/archives', async (req, res) => {
+  try {
+    res.json([]);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch series archives' });
+  }
+});
+
+// Teams endpoints
+app.get('/api/teams', async (req, res) => {
+  try {
+    const teams = [
+      {
+        teamId: '1',
+        teamName: 'India',
+        teamSName: 'IND',
+        teamType: 'INTERNATIONAL'
+      },
+      {
+        teamId: '2', 
+        teamName: 'Australia',
+        teamSName: 'AUS',
+        teamType: 'INTERNATIONAL'
+      },
+      {
+        teamId: '3',
+        teamName: 'England', 
+        teamSName: 'ENG',
+        teamType: 'INTERNATIONAL'
+      },
+      {
+        teamId: '4',
+        teamName: 'South Africa',
+        teamSName: 'SA', 
+        teamType: 'INTERNATIONAL'
+      },
+      {
+        teamId: '5',
+        teamName: 'New Zealand',
+        teamSName: 'NZ',
+        teamType: 'INTERNATIONAL'
+      },
+      {
+        teamId: '6',
+        teamName: 'Sri Lanka',
+        teamSName: 'SL',
+        teamType: 'INTERNATIONAL'
+      },
+      {
+        teamId: '7',
+        teamName: 'Pakistan',
+        teamSName: 'PAK',
+        teamType: 'INTERNATIONAL'
+      },
+      {
+        teamId: '8',
+        teamName: 'West Indies',
+        teamSName: 'WI',
+        teamType: 'INTERNATIONAL'
+      },
+      {
+        teamId: '9',
+        teamName: 'Bangladesh',
+        teamSName: 'BAN',
+        teamType: 'INTERNATIONAL'
+      },
+      {
+        teamId: '10',
+        teamName: 'Afghanistan',
+        teamSName: 'AFG',
+        teamType: 'INTERNATIONAL'
+      }
+    ];
+    
+    res.json(teams);
+  } catch (error) {
+    console.error('Teams error:', error);
+    res.status(500).json({ error: 'Failed to fetch teams' });
+  }
+});
+
+// News endpoints
+app.get('/api/news', async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+    
+    const news = [
+      {
+        id: '1',
+        headline: 'Australia vs New Zealand ODI Series Preview',
+        intro: 'The highly anticipated ODI series between Australia and New Zealand is set to begin...',
+        publishTime: new Date().toISOString(),
+        source: 'Cricket News',
+        imageId: 'news1'
+      },
+      {
+        id: '2', 
+        headline: 'India vs England T20I Series: Key Players to Watch',
+        intro: 'As India prepares to host England for the T20I series...',
+        publishTime: new Date().toISOString(),
+        source: 'Cricket News',
+        imageId: 'news2'
+      },
+      {
+        id: '3',
+        headline: 'South Africa vs Pakistan Test Series Begins',
+        intro: 'The Test series between South Africa and Pakistan kicks off...',
+        publishTime: new Date().toISOString(),
+        source: 'Cricket News', 
+        imageId: 'news3'
+      }
+    ];
+    
+    res.json(news.slice(0, Number(limit)));
+  } catch (error) {
+    console.error('News error:', error);
+    res.status(500).json({ error: 'Failed to fetch news' });
+  }
+});
+
+app.get('/api/news/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const newsItem = {
+      id,
+      headline: 'Cricket Match Preview',
+      intro: 'Detailed analysis of the upcoming cricket match...',
+      content: 'Full article content would go here...',
+      publishTime: new Date().toISOString(),
+      source: 'Cricket News',
+      imageId: 'news1'
+    };
+    
+    res.json(newsItem);
+  } catch (error) {
+    console.error('News detail error:', error);
+    res.status(500).json({ error: 'Failed to fetch news detail' });
+  }
+});
+
+app.get('/api/news/categories', async (req, res) => {
+  try {
+    const categories = [
+      { id: '1', name: 'Match Reports' },
+      { id: '2', name: 'Features' },
+      { id: '3', name: 'Latest News' }
+    ];
+    res.json(categories);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch categories' });
+  }
+});
+
+// Players endpoints
+app.get('/api/players/search', async (req, res) => {
+  try {
+    const { plrN } = req.query;
+    
+    const players = [
+      {
+        id: '1',
+        name: 'Virat Kohli',
+        teamName: 'India',
+        role: 'Batsman'
+      },
+      {
+        id: '2',
+        name: 'Steve Smith', 
+        teamName: 'Australia',
+        role: 'Batsman'
+      },
+      {
+        id: '3',
+        name: 'Joe Root',
+        teamName: 'England', 
+        role: 'Batsman'
+      }
+    ];
+    
+    const filteredPlayers = plrN ? 
+      players.filter(p => p.name.toLowerCase().includes(plrN.toLowerCase())) : 
+      players;
+    
+    res.json(filteredPlayers);
+  } catch (error) {
+    console.error('Players search error:', error);
+    res.status(500).json({ error: 'Failed to search players' });
+  }
+});
+
+app.get('/api/players/trending', async (req, res) => {
+  try {
+    const players = [
+      {
+        id: '1',
+        name: 'Virat Kohli',
+        teamName: 'India',
+        role: 'Batsman',
+        stats: { runs: 12000, average: 50.5 }
+      },
+      {
+        id: '2', 
+        name: 'Steve Smith',
+        teamName: 'Australia',
+        role: 'Batsman',
+        stats: { runs: 8500, average: 61.8 }
+      }
+    ];
+    
+    res.json(players);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch trending players' });
+  }
+});
+
+// Venues endpoints
+app.get('/api/venues/:id/info', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const venue = {
+      id,
+      name: 'Melbourne Cricket Ground',
+      city: 'Melbourne',
+      country: 'Australia',
+      capacity: 100024,
+      established: 1853
+    };
+    
+    res.json(venue);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch venue info' });
+  }
+});
+
+app.get('/api/venues/:id/matches', async (req, res) => {
+  try {
+    res.json([]);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch venue matches' });
+  }
+});
+
+// Rankings endpoints
+app.get('/api/rankings/*', async (req, res) => {
+  try {
+    res.json([]);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch rankings' });
+  }
+});
+
+// Photos endpoints
+app.get('/api/photos/*', async (req, res) => {
+  try {
+    res.json([]);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch photos' });
+  }
+});
+
+// Admin endpoints
+app.get('/api/admin/*', async (req, res) => {
+  try {
+    res.json({ message: 'Admin endpoint' });
+  } catch (error) {
+    res.status(500).json({ error: 'Admin error' });
+  }
+});
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' });
