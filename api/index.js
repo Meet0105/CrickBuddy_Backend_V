@@ -168,6 +168,30 @@ app.get('/api/matches/upcoming', async (req, res) => {
   }
 });
 
+// Match by ID endpoint
+app.get('/api/matches/:id', async (req, res) => {
+  try {
+    await connectDB();
+    
+    const { id } = req.params;
+    const match = await Match.findOne({
+      $or: [
+        { matchId: id },
+        { _id: id }
+      ]
+    });
+    
+    if (!match) {
+      return res.status(404).json({ message: 'Match not found' });
+    }
+    
+    res.json(match);
+  } catch (error) {
+    console.error('Match by ID error:', error);
+    res.status(500).json({ error: 'Failed to fetch match' });
+  }
+});
+
 // All matches endpoint
 app.get('/api/matches', async (req, res) => {
   try {
