@@ -2,8 +2,12 @@
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
+const axios = require('axios');
 
 const app = express();
+
+// Import environment variables
+require('dotenv').config({ path: '../.env' });
 
 // CORS setup
 app.use(cors({
@@ -85,8 +89,9 @@ app.get('/api/hello', (req, res) => {
 app.get('/api/matches/live', async (req, res) => {
   try {
     await connectDB();
-    
-    const liveMatches = await Match.find({
+
+    // First try to get from database
+    let liveMatches = await Match.find({
       $or: [
         { status: 'LIVE' },
         { status: 'Live' },
@@ -94,10 +99,81 @@ app.get('/api/matches/live', async (req, res) => {
         { isLive: true }
       ]
     })
-    .sort({ startDate: -1 })
-    .limit(10)
-    .select('matchId title shortTitle teams venue series startDate format status isLive');
-    
+      .sort({ startDate: -1 })
+      .limit(10)
+      .select('matchId title shortTitle teams venue series startDate format status isLive');
+
+    // If no live matches in database, try to fetch from RapidAPI
+    if (liveMatches.length === 0 && process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_MATCHES_LIVE_URL) {
+      try {
+        console.log('Fetching live matches from RapidAPI...');
+        const response = await axios.get(process.env.RAPIDAPI_MATCHES_LIVE_URL, {
+          headers: {
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+            'x-rapidapi-host': process.env.RAPIDAPI_HOST
+          },
+          timeout: 10000
+        });
+
+        if (response.data && response.data.typeMatches) {
+          const liveMatchesData = response.data.typeMatches.find(type =>
+            type.matchType === 'Live Matches'
+          );
+
+          if (liveMatchesData && liveMatchesData.seriesMatches) {
+            const processedMatches = [];
+
+            for (const seriesMatch of liveMatchesData.seriesMatches) {
+              if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
+                for (const match of seriesMatch.seriesAdWrapper.matches) {
+                  if (match.matchInfo) {
+                    const processedMatch = {
+                      matchId: match.matchInfo.matchId?.toString(),
+                      title: match.matchInfo.matchDesc || `${match.matchInfo.team1?.teamName} vs ${match.matchInfo.team2?.teamName}`,
+                      shortTitle: match.matchInfo.shortDesc || match.matchInfo.matchDesc,
+                      format: match.matchInfo.matchFormat || 'Unknown',
+                      status: 'LIVE',
+                      isLive: true,
+                      teams: [
+                        {
+                          teamId: match.matchInfo.team1?.teamId?.toString(),
+                          teamName: match.matchInfo.team1?.teamName,
+                          teamShortName: match.matchInfo.team1?.teamSName,
+                          score: { runs: 0, wickets: 0, overs: 0, runRate: 0 }
+                        },
+                        {
+                          teamId: match.matchInfo.team2?.teamId?.toString(),
+                          teamName: match.matchInfo.team2?.teamName,
+                          teamShortName: match.matchInfo.team2?.teamSName,
+                          score: { runs: 0, wickets: 0, overs: 0, runRate: 0 }
+                        }
+                      ],
+                      venue: {
+                        name: match.matchInfo.venueInfo?.ground || 'TBD',
+                        city: match.matchInfo.venueInfo?.city || '',
+                        country: match.matchInfo.venueInfo?.country || ''
+                      },
+                      series: {
+                        id: match.matchInfo.seriesId?.toString(),
+                        name: match.matchInfo.seriesName || 'Unknown Series',
+                        seriesType: 'INTERNATIONAL'
+                      },
+                      startDate: match.matchInfo.startDate ? new Date(parseInt(match.matchInfo.startDate)) : new Date()
+                    };
+                    processedMatches.push(processedMatch);
+                  }
+                }
+              }
+            }
+
+            liveMatches = processedMatches;
+          }
+        }
+      } catch (apiError) {
+        console.error('RapidAPI live matches error:', apiError.message);
+      }
+    }
+
     res.json(liveMatches);
   } catch (error) {
     console.error('Live matches error:', error);
@@ -109,10 +185,11 @@ app.get('/api/matches/live', async (req, res) => {
 app.get('/api/matches/recent', async (req, res) => {
   try {
     await connectDB();
-    
+
     const { limit = 10 } = req.query;
-    
-    const recentMatches = await Match.find({
+
+    // First try database
+    let recentMatches = await Match.find({
       $or: [
         { status: 'COMPLETED' },
         { status: 'Complete' },
@@ -120,10 +197,112 @@ app.get('/api/matches/recent', async (req, res) => {
         { status: { $regex: 'finished', $options: 'i' } }
       ]
     })
-    .sort({ startDate: -1 })
-    .limit(Number(limit))
-    .select('matchId title shortTitle teams venue series startDate format status');
-    
+      .sort({ startDate: -1 })
+      .limit(Number(limit))
+      .select('matchId title shortTitle teams venue series startDate format status');
+
+    // If no recent matches, return sample data
+    if (recentMatches.length === 0) {
+      recentMatches = [
+        {
+          matchId: 'recent001',
+          title: 'Pakistan vs New Zealand, 3rd T20I',
+          shortTitle: 'PAK vs NZ',
+          format: 'T20',
+          status: 'COMPLETED',
+          teams: [
+            {
+              teamId: '7',
+              teamName: 'Pakistan',
+              teamShortName: 'PAK',
+              score: { runs: 178, wickets: 6, overs: 20, runRate: 8.9 }
+            },
+            {
+              teamId: '5',
+              teamName: 'New Zealand',
+              teamShortName: 'NZ',
+              score: { runs: 165, wickets: 8, overs: 20, runRate: 8.25 }
+            }
+          ],
+          venue: {
+            name: 'National Stadium',
+            city: 'Karachi',
+            country: 'Pakistan'
+          },
+          series: {
+            id: 'pak-nz-t20-2025',
+            name: 'Pakistan vs New Zealand T20I Series 2025',
+            seriesType: 'BILATERAL'
+          },
+          startDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) // 2 days ago
+        },
+        {
+          matchId: 'recent002',
+          title: 'West Indies vs Sri Lanka, 2nd ODI',
+          shortTitle: 'WI vs SL',
+          format: 'ODI',
+          status: 'COMPLETED',
+          teams: [
+            {
+              teamId: '8',
+              teamName: 'West Indies',
+              teamShortName: 'WI',
+              score: { runs: 245, wickets: 9, overs: 50, runRate: 4.9 }
+            },
+            {
+              teamId: '6',
+              teamName: 'Sri Lanka',
+              teamShortName: 'SL',
+              score: { runs: 248, wickets: 5, overs: 47.3, runRate: 5.23 }
+            }
+          ],
+          venue: {
+            name: 'Kensington Oval',
+            city: 'Bridgetown',
+            country: 'Barbados'
+          },
+          series: {
+            id: 'wi-sl-odi-2025',
+            name: 'West Indies vs Sri Lanka ODI Series 2025',
+            seriesType: 'BILATERAL'
+          },
+          startDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) // 3 days ago
+        },
+        {
+          matchId: 'recent003',
+          title: 'Bangladesh vs Afghanistan, 1st Test',
+          shortTitle: 'BAN vs AFG',
+          format: 'TEST',
+          status: 'COMPLETED',
+          teams: [
+            {
+              teamId: '9',
+              teamName: 'Bangladesh',
+              teamShortName: 'BAN',
+              score: { runs: 334, wickets: 10, overs: 98.2, runRate: 3.4 }
+            },
+            {
+              teamId: '10',
+              teamName: 'Afghanistan',
+              teamShortName: 'AFG',
+              score: { runs: 298, wickets: 10, overs: 89.4, runRate: 3.33 }
+            }
+          ],
+          venue: {
+            name: 'Shere Bangla National Stadium',
+            city: 'Dhaka',
+            country: 'Bangladesh'
+          },
+          series: {
+            id: 'ban-afg-test-2025',
+            name: 'Bangladesh vs Afghanistan Test Series 2025',
+            seriesType: 'BILATERAL'
+          },
+          startDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) // 5 days ago
+        }
+      ];
+    }
+
     res.json(recentMatches);
   } catch (error) {
     console.error('Recent matches error:', error);
@@ -135,9 +314,9 @@ app.get('/api/matches/recent', async (req, res) => {
 app.get('/api/matches/upcoming', async (req, res) => {
   try {
     await connectDB();
-    
+
     const { limit = 10 } = req.query;
-    
+
     const upcomingMatches = await Match.find({
       $and: [
         {
@@ -157,10 +336,10 @@ app.get('/api/matches/upcoming', async (req, res) => {
         }
       ]
     })
-    .sort({ startDate: 1 })
-    .limit(Number(limit))
-    .select('matchId title shortTitle teams venue series startDate format status');
-    
+      .sort({ startDate: 1 })
+      .limit(Number(limit))
+      .select('matchId title shortTitle teams venue series startDate format status');
+
     res.json(upcomingMatches);
   } catch (error) {
     console.error('Upcoming matches error:', error);
@@ -172,7 +351,7 @@ app.get('/api/matches/upcoming', async (req, res) => {
 app.get('/api/matches/:id', async (req, res) => {
   try {
     await connectDB();
-    
+
     const { id } = req.params;
     const match = await Match.findOne({
       $or: [
@@ -180,11 +359,11 @@ app.get('/api/matches/:id', async (req, res) => {
         { _id: id }
       ]
     });
-    
+
     if (!match) {
       return res.status(404).json({ message: 'Match not found' });
     }
-    
+
     res.json(match);
   } catch (error) {
     console.error('Match by ID error:', error);
@@ -196,19 +375,19 @@ app.get('/api/matches/:id', async (req, res) => {
 app.get('/api/matches', async (req, res) => {
   try {
     await connectDB();
-    
+
     const { format, limit = 20 } = req.query;
-    
+
     let query = {};
     if (format) {
       query.format = { $regex: format, $options: 'i' };
     }
-    
+
     const matches = await Match.find(query)
       .sort({ startDate: -1 })
       .limit(Number(limit))
       .select('matchId title shortTitle teams venue series startDate format status');
-    
+
     res.json(matches);
   } catch (error) {
     console.error('All matches error:', error);
@@ -219,27 +398,74 @@ app.get('/api/matches', async (req, res) => {
 // Series endpoints
 app.get('/api/series', async (req, res) => {
   try {
-    await connectDB();
-    
-    // For now, return placeholder series data
-    const series = [
+    // Try to fetch from RapidAPI series endpoint
+    if (process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_SERIES_LIST_URL) {
+      try {
+        console.log('Fetching series from RapidAPI...');
+        const response = await axios.get(process.env.RAPIDAPI_SERIES_LIST_URL, {
+          headers: {
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+            'x-rapidapi-host': process.env.RAPIDAPI_HOST
+          },
+          timeout: 10000
+        });
+
+        if (response.data) {
+          // Process the series data from RapidAPI
+          let seriesList = [];
+
+          if (response.data.seriesMapProto) {
+            for (const seriesProto of response.data.seriesMapProto) {
+              if (seriesProto.series) {
+                seriesList.push(...seriesProto.series.map(series => ({
+                  id: series.id?.toString(),
+                  name: series.name,
+                  seriesType: series.seriesType || 'INTERNATIONAL',
+                  startDate: series.startDt ? new Date(parseInt(series.startDt)) : null,
+                  endDate: series.endDt ? new Date(parseInt(series.endDt)) : null,
+                  status: series.status || 'UPCOMING'
+                })));
+              }
+            }
+          } else if (response.data.series) {
+            seriesList = response.data.series.map(series => ({
+              id: series.id?.toString(),
+              name: series.name,
+              seriesType: series.seriesType || 'INTERNATIONAL',
+              startDate: series.startDt ? new Date(parseInt(series.startDt)) : null,
+              endDate: series.endDt ? new Date(parseInt(series.endDt)) : null,
+              status: series.status || 'UPCOMING'
+            }));
+          }
+
+          return res.json(seriesList);
+        }
+      } catch (apiError) {
+        console.error('RapidAPI series error:', apiError.message);
+      }
+    }
+
+    // Fallback to sample data if API fails
+    const fallbackSeries = [
       {
         id: 'aus-nz-2025',
         name: 'Australia vs New Zealand ODI Series 2025',
         seriesType: 'BILATERAL',
         startDate: new Date('2025-02-15'),
-        endDate: new Date('2025-02-25')
+        endDate: new Date('2025-02-25'),
+        status: 'UPCOMING'
       },
       {
-        id: 'ind-eng-2025', 
+        id: 'ind-eng-2025',
         name: 'India vs England T20I Series 2025',
         seriesType: 'BILATERAL',
         startDate: new Date('2025-02-18'),
-        endDate: new Date('2025-02-28')
+        endDate: new Date('2025-02-28'),
+        status: 'UPCOMING'
       }
     ];
-    
-    res.json(series);
+
+    res.json(fallbackSeries);
   } catch (error) {
     console.error('Series error:', error);
     res.status(500).json({ error: 'Failed to fetch series' });
@@ -257,70 +483,49 @@ app.get('/api/series/archives', async (req, res) => {
 // Teams endpoints
 app.get('/api/teams', async (req, res) => {
   try {
-    const teams = [
-      {
-        teamId: '1',
-        teamName: 'India',
-        teamSName: 'IND',
-        teamType: 'INTERNATIONAL'
-      },
-      {
-        teamId: '2', 
-        teamName: 'Australia',
-        teamSName: 'AUS',
-        teamType: 'INTERNATIONAL'
-      },
-      {
-        teamId: '3',
-        teamName: 'England', 
-        teamSName: 'ENG',
-        teamType: 'INTERNATIONAL'
-      },
-      {
-        teamId: '4',
-        teamName: 'South Africa',
-        teamSName: 'SA', 
-        teamType: 'INTERNATIONAL'
-      },
-      {
-        teamId: '5',
-        teamName: 'New Zealand',
-        teamSName: 'NZ',
-        teamType: 'INTERNATIONAL'
-      },
-      {
-        teamId: '6',
-        teamName: 'Sri Lanka',
-        teamSName: 'SL',
-        teamType: 'INTERNATIONAL'
-      },
-      {
-        teamId: '7',
-        teamName: 'Pakistan',
-        teamSName: 'PAK',
-        teamType: 'INTERNATIONAL'
-      },
-      {
-        teamId: '8',
-        teamName: 'West Indies',
-        teamSName: 'WI',
-        teamType: 'INTERNATIONAL'
-      },
-      {
-        teamId: '9',
-        teamName: 'Bangladesh',
-        teamSName: 'BAN',
-        teamType: 'INTERNATIONAL'
-      },
-      {
-        teamId: '10',
-        teamName: 'Afghanistan',
-        teamSName: 'AFG',
-        teamType: 'INTERNATIONAL'
+    // Try to fetch from RapidAPI teams endpoint
+    if (process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_TEAMS_LIST_URL) {
+      try {
+        console.log('Fetching teams from RapidAPI...');
+        const response = await axios.get(process.env.RAPIDAPI_TEAMS_LIST_URL, {
+          headers: {
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+            'x-rapidapi-host': process.env.RAPIDAPI_HOST
+          },
+          timeout: 10000
+        });
+
+        if (response.data && response.data.list) {
+          const teamsList = response.data.list.map(team => ({
+            teamId: team.teamId?.toString(),
+            teamName: team.teamName,
+            teamSName: team.teamSName,
+            teamType: team.teamType || 'INTERNATIONAL',
+            imageId: team.imageId
+          }));
+
+          return res.json(teamsList);
+        }
+      } catch (apiError) {
+        console.error('RapidAPI teams error:', apiError.message);
       }
+    }
+
+    // Fallback teams data
+    const fallbackTeams = [
+      { teamId: '1', teamName: 'India', teamSName: 'IND', teamType: 'INTERNATIONAL' },
+      { teamId: '2', teamName: 'Australia', teamSName: 'AUS', teamType: 'INTERNATIONAL' },
+      { teamId: '3', teamName: 'England', teamSName: 'ENG', teamType: 'INTERNATIONAL' },
+      { teamId: '4', teamName: 'South Africa', teamSName: 'SA', teamType: 'INTERNATIONAL' },
+      { teamId: '5', teamName: 'New Zealand', teamSName: 'NZ', teamType: 'INTERNATIONAL' },
+      { teamId: '6', teamName: 'Sri Lanka', teamSName: 'SL', teamType: 'INTERNATIONAL' },
+      { teamId: '7', teamName: 'Pakistan', teamSName: 'PAK', teamType: 'INTERNATIONAL' },
+      { teamId: '8', teamName: 'West Indies', teamSName: 'WI', teamType: 'INTERNATIONAL' },
+      { teamId: '9', teamName: 'Bangladesh', teamSName: 'BAN', teamType: 'INTERNATIONAL' },
+      { teamId: '10', teamName: 'Afghanistan', teamSName: 'AFG', teamType: 'INTERNATIONAL' }
     ];
-    
-    res.json(teams);
+
+    res.json(fallbackTeams);
   } catch (error) {
     console.error('Teams error:', error);
     res.status(500).json({ error: 'Failed to fetch teams' });
@@ -331,35 +536,49 @@ app.get('/api/teams', async (req, res) => {
 app.get('/api/news', async (req, res) => {
   try {
     const { limit = 10 } = req.query;
-    
-    const news = [
+
+    // Try to fetch from RapidAPI news endpoint
+    if (process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_NEWS_LIST_URL) {
+      try {
+        console.log('Fetching news from RapidAPI...');
+        const response = await axios.get(process.env.RAPIDAPI_NEWS_LIST_URL, {
+          headers: {
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+            'x-rapidapi-host': process.env.RAPIDAPI_HOST
+          },
+          timeout: 10000
+        });
+
+        if (response.data && response.data.storyList) {
+          const newsList = response.data.storyList.slice(0, Number(limit)).map(story => ({
+            id: story.story?.id?.toString() || story.id?.toString(),
+            headline: story.story?.hline || story.hline || 'Cricket News',
+            intro: story.story?.intro || story.intro || '',
+            publishTime: story.story?.pubTime ? new Date(parseInt(story.story.pubTime)).toISOString() : new Date().toISOString(),
+            source: story.story?.source || 'Cricbuzz',
+            imageId: story.story?.imageId || story.imageId
+          }));
+
+          return res.json(newsList);
+        }
+      } catch (apiError) {
+        console.error('RapidAPI news error:', apiError.message);
+      }
+    }
+
+    // Fallback news data
+    const fallbackNews = [
       {
         id: '1',
-        headline: 'Australia vs New Zealand ODI Series Preview',
-        intro: 'The highly anticipated ODI series between Australia and New Zealand is set to begin...',
+        headline: 'Cricket Match Updates',
+        intro: 'Latest updates from the cricket world...',
         publishTime: new Date().toISOString(),
         source: 'Cricket News',
         imageId: 'news1'
-      },
-      {
-        id: '2', 
-        headline: 'India vs England T20I Series: Key Players to Watch',
-        intro: 'As India prepares to host England for the T20I series...',
-        publishTime: new Date().toISOString(),
-        source: 'Cricket News',
-        imageId: 'news2'
-      },
-      {
-        id: '3',
-        headline: 'South Africa vs Pakistan Test Series Begins',
-        intro: 'The Test series between South Africa and Pakistan kicks off...',
-        publishTime: new Date().toISOString(),
-        source: 'Cricket News', 
-        imageId: 'news3'
       }
     ];
-    
-    res.json(news.slice(0, Number(limit)));
+
+    res.json(fallbackNews);
   } catch (error) {
     console.error('News error:', error);
     res.status(500).json({ error: 'Failed to fetch news' });
@@ -369,7 +588,7 @@ app.get('/api/news', async (req, res) => {
 app.get('/api/news/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const newsItem = {
       id,
       headline: 'Cricket Match Preview',
@@ -379,7 +598,7 @@ app.get('/api/news/:id', async (req, res) => {
       source: 'Cricket News',
       imageId: 'news1'
     };
-    
+
     res.json(newsItem);
   } catch (error) {
     console.error('News detail error:', error);
@@ -404,32 +623,47 @@ app.get('/api/news/categories', async (req, res) => {
 app.get('/api/players/search', async (req, res) => {
   try {
     const { plrN } = req.query;
-    
-    const players = [
-      {
-        id: '1',
-        name: 'Virat Kohli',
-        teamName: 'India',
-        role: 'Batsman'
-      },
-      {
-        id: '2',
-        name: 'Steve Smith', 
-        teamName: 'Australia',
-        role: 'Batsman'
-      },
-      {
-        id: '3',
-        name: 'Joe Root',
-        teamName: 'England', 
-        role: 'Batsman'
+
+    // Try to fetch from RapidAPI players search endpoint
+    if (process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_PLAYERS_SEARCH_BASE_URL && plrN) {
+      try {
+        console.log('Searching players from RapidAPI...');
+        const searchUrl = `${process.env.RAPIDAPI_PLAYERS_SEARCH_BASE_URL}${encodeURIComponent(plrN)}`;
+        const response = await axios.get(searchUrl, {
+          headers: {
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+            'x-rapidapi-host': process.env.RAPIDAPI_HOST
+          },
+          timeout: 10000
+        });
+
+        if (response.data && response.data.player) {
+          const playersList = response.data.player.map(player => ({
+            id: player.id?.toString(),
+            name: player.name,
+            teamName: player.teamName,
+            role: player.role,
+            imageId: player.imageId
+          }));
+
+          return res.json(playersList);
+        }
+      } catch (apiError) {
+        console.error('RapidAPI players search error:', apiError.message);
       }
+    }
+
+    // Fallback players data
+    const fallbackPlayers = [
+      { id: '1', name: 'Virat Kohli', teamName: 'India', role: 'Batsman' },
+      { id: '2', name: 'Steve Smith', teamName: 'Australia', role: 'Batsman' },
+      { id: '3', name: 'Joe Root', teamName: 'England', role: 'Batsman' }
     ];
-    
-    const filteredPlayers = plrN ? 
-      players.filter(p => p.name.toLowerCase().includes(plrN.toLowerCase())) : 
-      players;
-    
+
+    const filteredPlayers = plrN ?
+      fallbackPlayers.filter(p => p.name.toLowerCase().includes(plrN.toLowerCase())) :
+      fallbackPlayers;
+
     res.json(filteredPlayers);
   } catch (error) {
     console.error('Players search error:', error);
@@ -448,14 +682,14 @@ app.get('/api/players/trending', async (req, res) => {
         stats: { runs: 12000, average: 50.5 }
       },
       {
-        id: '2', 
+        id: '2',
         name: 'Steve Smith',
         teamName: 'Australia',
         role: 'Batsman',
         stats: { runs: 8500, average: 61.8 }
       }
     ];
-    
+
     res.json(players);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch trending players' });
@@ -466,7 +700,7 @@ app.get('/api/players/trending', async (req, res) => {
 app.get('/api/venues/:id/info', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const venue = {
       id,
       name: 'Melbourne Cricket Ground',
@@ -475,7 +709,7 @@ app.get('/api/venues/:id/info', async (req, res) => {
       capacity: 100024,
       established: 1853
     };
-    
+
     res.json(venue);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch venue info' });
