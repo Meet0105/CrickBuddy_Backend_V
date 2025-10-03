@@ -188,7 +188,79 @@ app.get('/api/matches/recent', async (req, res) => {
 
     const { limit = 10 } = req.query;
 
-    // First try database
+    // First try to fetch from RapidAPI
+    if (process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_MATCHES_RECENT_URL) {
+      try {
+        console.log('Fetching recent matches from RapidAPI...');
+        const response = await axios.get(process.env.RAPIDAPI_MATCHES_RECENT_URL, {
+          headers: {
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+            'x-rapidapi-host': process.env.RAPIDAPI_HOST
+          },
+          timeout: 10000
+        });
+
+        if (response.data && response.data.typeMatches) {
+          const recentMatchesData = response.data.typeMatches.find(type =>
+            type.matchType === 'Recent Matches'
+          );
+
+          if (recentMatchesData && recentMatchesData.seriesMatches) {
+            const processedMatches = [];
+
+            for (const seriesMatch of recentMatchesData.seriesMatches) {
+              if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
+                for (const match of seriesMatch.seriesAdWrapper.matches) {
+                  if (match.matchInfo) {
+                    const processedMatch = {
+                      matchId: match.matchInfo.matchId?.toString(),
+                      title: match.matchInfo.matchDesc || `${match.matchInfo.team1?.teamName} vs ${match.matchInfo.team2?.teamName}`,
+                      shortTitle: match.matchInfo.shortDesc || match.matchInfo.matchDesc,
+                      format: match.matchInfo.matchFormat || 'Unknown',
+                      status: 'COMPLETED',
+                      teams: [
+                        {
+                          teamId: match.matchInfo.team1?.teamId?.toString(),
+                          teamName: match.matchInfo.team1?.teamName,
+                          teamShortName: match.matchInfo.team1?.teamSName,
+                          score: { runs: 0, wickets: 0, overs: 0, runRate: 0 }
+                        },
+                        {
+                          teamId: match.matchInfo.team2?.teamId?.toString(),
+                          teamName: match.matchInfo.team2?.teamName,
+                          teamShortName: match.matchInfo.team2?.teamSName,
+                          score: { runs: 0, wickets: 0, overs: 0, runRate: 0 }
+                        }
+                      ],
+                      venue: {
+                        name: match.matchInfo.venueInfo?.ground || 'TBD',
+                        city: match.matchInfo.venueInfo?.city || '',
+                        country: match.matchInfo.venueInfo?.country || ''
+                      },
+                      series: {
+                        id: match.matchInfo.seriesId?.toString(),
+                        name: match.matchInfo.seriesName || 'Unknown Series',
+                        seriesType: 'INTERNATIONAL'
+                      },
+                      startDate: match.matchInfo.startDate ? new Date(parseInt(match.matchInfo.startDate)) : new Date()
+                    };
+                    processedMatches.push(processedMatch);
+                  }
+                }
+              }
+            }
+
+            // Return the fresh API data (limited)
+            return res.json(processedMatches.slice(0, Number(limit)));
+          }
+        }
+      } catch (apiError) {
+        console.error('RapidAPI recent matches error:', apiError.message);
+      }
+    }
+
+    // Fallback to database if API fails
+    console.log('Falling back to database for recent matches');
     let recentMatches = await Match.find({
       $or: [
         { status: 'COMPLETED' },
@@ -201,107 +273,8 @@ app.get('/api/matches/recent', async (req, res) => {
       .limit(Number(limit))
       .select('matchId title shortTitle teams venue series startDate format status');
 
-    // If no recent matches, return sample data
-    if (recentMatches.length === 0) {
-      recentMatches = [
-        {
-          matchId: 'recent001',
-          title: 'Pakistan vs New Zealand, 3rd T20I',
-          shortTitle: 'PAK vs NZ',
-          format: 'T20',
-          status: 'COMPLETED',
-          teams: [
-            {
-              teamId: '7',
-              teamName: 'Pakistan',
-              teamShortName: 'PAK',
-              score: { runs: 178, wickets: 6, overs: 20, runRate: 8.9 }
-            },
-            {
-              teamId: '5',
-              teamName: 'New Zealand',
-              teamShortName: 'NZ',
-              score: { runs: 165, wickets: 8, overs: 20, runRate: 8.25 }
-            }
-          ],
-          venue: {
-            name: 'National Stadium',
-            city: 'Karachi',
-            country: 'Pakistan'
-          },
-          series: {
-            id: 'pak-nz-t20-2025',
-            name: 'Pakistan vs New Zealand T20I Series 2025',
-            seriesType: 'BILATERAL'
-          },
-          startDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) // 2 days ago
-        },
-        {
-          matchId: 'recent002',
-          title: 'West Indies vs Sri Lanka, 2nd ODI',
-          shortTitle: 'WI vs SL',
-          format: 'ODI',
-          status: 'COMPLETED',
-          teams: [
-            {
-              teamId: '8',
-              teamName: 'West Indies',
-              teamShortName: 'WI',
-              score: { runs: 245, wickets: 9, overs: 50, runRate: 4.9 }
-            },
-            {
-              teamId: '6',
-              teamName: 'Sri Lanka',
-              teamShortName: 'SL',
-              score: { runs: 248, wickets: 5, overs: 47.3, runRate: 5.23 }
-            }
-          ],
-          venue: {
-            name: 'Kensington Oval',
-            city: 'Bridgetown',
-            country: 'Barbados'
-          },
-          series: {
-            id: 'wi-sl-odi-2025',
-            name: 'West Indies vs Sri Lanka ODI Series 2025',
-            seriesType: 'BILATERAL'
-          },
-          startDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) // 3 days ago
-        },
-        {
-          matchId: 'recent003',
-          title: 'Bangladesh vs Afghanistan, 1st Test',
-          shortTitle: 'BAN vs AFG',
-          format: 'TEST',
-          status: 'COMPLETED',
-          teams: [
-            {
-              teamId: '9',
-              teamName: 'Bangladesh',
-              teamShortName: 'BAN',
-              score: { runs: 334, wickets: 10, overs: 98.2, runRate: 3.4 }
-            },
-            {
-              teamId: '10',
-              teamName: 'Afghanistan',
-              teamShortName: 'AFG',
-              score: { runs: 298, wickets: 10, overs: 89.4, runRate: 3.33 }
-            }
-          ],
-          venue: {
-            name: 'Shere Bangla National Stadium',
-            city: 'Dhaka',
-            country: 'Bangladesh'
-          },
-          series: {
-            id: 'ban-afg-test-2025',
-            name: 'Bangladesh vs Afghanistan Test Series 2025',
-            seriesType: 'BILATERAL'
-          },
-          startDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) // 5 days ago
-        }
-      ];
-    }
+    // If no recent matches in database, return empty array (API should provide data)
+    // No manual fallback data needed since we're fetching from RapidAPI
 
     res.json(recentMatches);
   } catch (error) {
@@ -317,6 +290,79 @@ app.get('/api/matches/upcoming', async (req, res) => {
 
     const { limit = 10 } = req.query;
 
+    // First try to fetch from RapidAPI
+    if (process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_MATCHES_UPCOMING_URL) {
+      try {
+        console.log('Fetching upcoming matches from RapidAPI...');
+        const response = await axios.get(process.env.RAPIDAPI_MATCHES_UPCOMING_URL, {
+          headers: {
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+            'x-rapidapi-host': process.env.RAPIDAPI_HOST
+          },
+          timeout: 10000
+        });
+
+        if (response.data && response.data.typeMatches) {
+          const upcomingMatchesData = response.data.typeMatches.find(type =>
+            type.matchType === 'Upcoming Matches'
+          );
+
+          if (upcomingMatchesData && upcomingMatchesData.seriesMatches) {
+            const processedMatches = [];
+
+            for (const seriesMatch of upcomingMatchesData.seriesMatches) {
+              if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
+                for (const match of seriesMatch.seriesAdWrapper.matches) {
+                  if (match.matchInfo) {
+                    const processedMatch = {
+                      matchId: match.matchInfo.matchId?.toString(),
+                      title: match.matchInfo.matchDesc || `${match.matchInfo.team1?.teamName} vs ${match.matchInfo.team2?.teamName}`,
+                      shortTitle: match.matchInfo.shortDesc || match.matchInfo.matchDesc,
+                      format: match.matchInfo.matchFormat || 'Unknown',
+                      status: 'UPCOMING',
+                      teams: [
+                        {
+                          teamId: match.matchInfo.team1?.teamId?.toString(),
+                          teamName: match.matchInfo.team1?.teamName,
+                          teamShortName: match.matchInfo.team1?.teamSName,
+                          score: { runs: 0, wickets: 0, overs: 0, runRate: 0 }
+                        },
+                        {
+                          teamId: match.matchInfo.team2?.teamId?.toString(),
+                          teamName: match.matchInfo.team2?.teamName,
+                          teamShortName: match.matchInfo.team2?.teamSName,
+                          score: { runs: 0, wickets: 0, overs: 0, runRate: 0 }
+                        }
+                      ],
+                      venue: {
+                        name: match.matchInfo.venueInfo?.ground || 'TBD',
+                        city: match.matchInfo.venueInfo?.city || '',
+                        country: match.matchInfo.venueInfo?.country || ''
+                      },
+                      series: {
+                        id: match.matchInfo.seriesId?.toString(),
+                        name: match.matchInfo.seriesName || 'Unknown Series',
+                        seriesType: 'INTERNATIONAL'
+                      },
+                      startDate: match.matchInfo.startDate ? new Date(parseInt(match.matchInfo.startDate)) : new Date()
+                    };
+                    processedMatches.push(processedMatch);
+                  }
+                }
+              }
+            }
+
+            // Return the fresh API data (limited)
+            return res.json(processedMatches.slice(0, Number(limit)));
+          }
+        }
+      } catch (apiError) {
+        console.error('RapidAPI upcoming matches error:', apiError.message);
+      }
+    }
+
+    // Fallback to database if API fails
+    console.log('Falling back to database for upcoming matches');
     const upcomingMatches = await Match.find({
       $and: [
         {
