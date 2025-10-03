@@ -346,12 +346,18 @@ app.get('/api/matches/:id', async (req, res) => {
     console.log(`🔍 Looking for match with ID: ${id}`);
 
     // First try to find in database
-    let match = await Match.findOne({
-      $or: [
-        { matchId: id },
-        { _id: id }
-      ]
-    });
+    let match = null;
+    try {
+      match = await Match.findOne({
+        $or: [
+          { matchId: id },
+          // Only try _id if it looks like a valid ObjectId
+          ...(id.match(/^[0-9a-fA-F]{24}$/) ? [{ _id: id }] : [])
+        ]
+      });
+    } catch (dbError) {
+      console.log('Database search error:', dbError.message);
+    }
 
     if (match) {
       console.log(`✅ Found match in database: ${match.title}`);
