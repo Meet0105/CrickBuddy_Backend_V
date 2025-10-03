@@ -1,32 +1,19 @@
 {
-  "name": "cricbuzz-backend-ts",
+  "name": "cricbuzz-backend",
   "version": "1.0.0",
-  "main": "dist/server.js",
+  "main": "api/server.js",
   "engines": {
     "node": "22.x"
   },
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
-    "sync": "ts-node src/utils/syncAllData.ts"
+    "dev": "node api/server.js",
+    "start": "node api/server.js"
   },
   "dependencies": {
-    "@vercel/node": "^5.3.24",
     "axios": "^1.4.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "mongoose": "^7.6.1",
-    "node-cron": "^4.2.1"
-  },
-  "devDependencies": {
-    "@types/cors": "^2.8.17",
-    "@types/express": "^4.17.21",
-    "@types/mongoose": "^5.11.96",
-    "@types/node": "^20.4.2",
-    "@types/node-cron": "^3.0.11",
-    "ts-node-dev": "^2.0.0",
-    "typescript": "^5.5.6"
+    "mongoose": "^7.6.1"
   }
 }
