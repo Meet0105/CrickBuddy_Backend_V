@@ -10,6 +10,7 @@ import seriesRoutes from './routes/series';
 import rankingsRoutes from './routes/rankings';
 import venueRoutes from './routes/venues';
 import photoRoutes from './routes/photos';
+import adminRoutes from './routes/admin';
 
 // Load environment variables
 dotenv.config({ path: __dirname + '/../.env' });
@@ -61,6 +62,7 @@ app.use('/api/series', seriesRoutes);
 app.use('/api/rankings', rankingsRoutes);
 app.use('/api/venues', venueRoutes);
 app.use('/api/photos', photoRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.use((req: Request, res: Response) => {
   res.status(404).json({ message: 'Route not found' });

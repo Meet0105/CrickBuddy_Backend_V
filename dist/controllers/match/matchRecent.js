@@ -1,11 +1,43 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getRecentMatches = void 0;
 const Match_1 = __importDefault(require("../../models/Match"));
-const axios_1 = __importDefault(require("axios"));
 const matchRecentHelpers_1 = require("./matchRecentHelpers");
 // Helper function to map API status to our enum values
 const mapStatusToEnum = (status) => {
@@ -35,18 +67,21 @@ const getRecentMatches = async (req, res) => {
         const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
         const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
         const RAPIDAPI_MATCHES_RECENT_URL = process.env.RAPIDAPI_MATCHES_RECENT_URL;
-        // If API key is available, try to fetch from API first
-        if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_RECENT_URL) {
+        // Import feature flags
+        const { isFeatureEnabled } = await Promise.resolve().then(() => __importStar(require('../../config/apiConfig')));
+        // If API key is available and feature is enabled, try to fetch from API first
+        if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_RECENT_URL && isFeatureEnabled('ENABLE_RECENT_MATCHES_API')) {
             try {
                 console.log('Fetching recent matches from API');
                 const headers = {
                     'x-rapidapi-key': RAPIDAPI_KEY,
                     'x-rapidapi-host': RAPIDAPI_HOST
                 };
-                const response = await axios_1.default.get(RAPIDAPI_MATCHES_RECENT_URL, { headers, timeout: 15000 });
+                const { rapidApiRateLimiter } = await Promise.resolve().then(() => __importStar(require('../../utils/rateLimiter')));
+                const response = await rapidApiRateLimiter.makeRequest(RAPIDAPI_MATCHES_RECENT_URL, { headers });
                 // Process API response and save to database
-                if (response.data && response.data.typeMatches) {
-                    const recentMatchesData = response.data.typeMatches.find((type) => type.matchType === 'Recent Matches');
+                if (response && response.typeMatches) {
+                    const recentMatchesData = response.typeMatches.find((type) => type.matchType === 'Recent Matches');
                     if (recentMatchesData && recentMatchesData.seriesMatches) {
                         const matchesList = [];
                         // Extract matches from series

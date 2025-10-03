@@ -6,19 +6,19 @@ import { processRawMatchData } from './matchUpcomingHelpers';
 // Helper function to map API status to our enum values
 const mapStatusToEnum = (status: string): 'UPCOMING' | 'LIVE' | 'COMPLETED' | 'ABANDONED' | 'CANCELLED' => {
   if (!status) return 'UPCOMING';
-  
+
   // Convert to lowercase for case-insensitive comparison
   const lowerStatus = status.toLowerCase();
-  
+
   // Map common status values
   if (lowerStatus.includes('live') || lowerStatus.includes('in progress')) return 'LIVE';
   if (lowerStatus.includes('complete') || lowerStatus.includes('finished')) return 'COMPLETED';
   if (lowerStatus.includes('abandon')) return 'ABANDONED';
   if (lowerStatus.includes('cancel')) return 'CANCELLED';
-  
+
   // For upcoming matches with date information
   if (lowerStatus.includes('match starts')) return 'UPCOMING';
-  
+
   // Default fallback
   return 'UPCOMING';
 };
@@ -30,8 +30,11 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
     const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
     const RAPIDAPI_MATCHES_UPCOMING_URL = process.env.RAPIDAPI_MATCHES_UPCOMING_URL;
 
-    // If API key is available, try to fetch from API first
-    if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_UPCOMING_URL) {
+    // Import feature flags
+    const { isFeatureEnabled } = await import('../../config/apiConfig');
+
+    // If API key is available and feature is enabled, try to fetch from API first
+    if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_UPCOMING_URL && isFeatureEnabled('ENABLE_UPCOMING_MATCHES_API')) {
       try {
         console.log('Fetching upcoming matches from API');
         const headers = {
@@ -39,17 +42,18 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
           'x-rapidapi-host': RAPIDAPI_HOST
         };
 
-        const response = await axios.get(RAPIDAPI_MATCHES_UPCOMING_URL, { headers, timeout: 15000 });
+        const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
+        const response = await rapidApiRateLimiter.makeRequest(RAPIDAPI_MATCHES_UPCOMING_URL, { headers }) as any;
 
         // Process API response and save to database
-        if (response.data && response.data.typeMatches) {
-          const upcomingMatchesData = response.data.typeMatches.find((type: any) => 
+        if (response && response.typeMatches) {
+          const upcomingMatchesData = response.typeMatches.find((type: any) =>
             type.matchType === 'Upcoming Matches'
           );
 
           if (upcomingMatchesData && upcomingMatchesData.seriesMatches) {
             const matchesList: any[] = [];
-            
+
             // Extract matches from series
             for (const seriesMatch of upcomingMatchesData.seriesMatches) {
               if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
@@ -60,15 +64,15 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
             // Process and save each match
             const upsertPromises = matchesList.map(async (m) => {
               const matchId = m.matchInfo?.matchId || m.id || m.matchId || JSON.stringify(m).slice(0, 40);
-              
+
               // Extract series information
               const seriesId = m.matchInfo?.seriesId || '0';
               const seriesName = m.matchInfo?.seriesName || 'Unknown Series';
-              
+
               // Extract team information
               const team1Info = m.matchInfo?.team1 || m.teamA || m.team1 || {};
               const team2Info = m.matchInfo?.team2 || m.teamB || m.team2 || {};
-              
+
               const team1Name = team1Info.teamName || team1Info.teamSName || team1Info.name || 'Team 1';
               const team2Name = team2Info.teamName || team2Info.teamSName || team2Info.name || 'Team 2';
               const team1Id = team1Info.teamId || team1Info.id || '1';
@@ -79,7 +83,7 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
               const title = m.matchInfo?.matchDesc || m.title || m.name || `${team1Name} vs ${team2Name}`;
               const rawStatus = m.matchInfo?.status || m.matchInfo?.state || m.status || m.matchStatus || 'UPCOMING';
               const mappedStatus = mapStatusToEnum(rawStatus);
-              
+
               // Check if match should be live based on time
               const matchStartTime = m.matchInfo?.startDate ? new Date(parseInt(m.matchInfo.startDate)) : null;
               const currentTime = new Date();
@@ -159,7 +163,7 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
             await Promise.all(upsertPromises);
 
             // Return from database after saving
-            const upcomingMatches = await Match.find({ 
+            const upcomingMatches = await Match.find({
               $and: [
                 {
                   $or: [
@@ -168,7 +172,7 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
                     { status: { $regex: 'Upcoming', $options: 'i' } },
                     { status: { $regex: 'Scheduled', $options: 'i' } },
                     { status: { $regex: 'scheduled', $options: 'i' } },
-                    { 
+                    {
                       startDate: { $gte: new Date() },
                       status: { $nin: ['COMPLETED', 'Complete', 'complete', 'Finished', 'finished'] }
                     }
@@ -179,22 +183,28 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
                 }
               ]
             })
-            .sort({ startDate: 1 })
-            .limit(Number(limit))
-            .select('matchId title shortTitle teams venue series startDate format status');
-            
+              .sort({ startDate: 1 })
+              .limit(Number(limit))
+              .select('matchId title shortTitle teams venue series startDate format status');
+
             return res.json(upcomingMatches);
           }
         }
-      } catch (apiError) {
-        console.error('API fetch failed for upcoming matches:', apiError);
+      } catch (apiError: any) {
+        if (apiError?.response?.status === 403) {
+          console.warn('⚠️ API access forbidden (403) - subscription may not include this endpoint');
+        } else if (apiError?.response?.status === 429) {
+          console.warn('⚠️ API rate limit exceeded (429) - using cached data');
+        } else {
+          console.error('API fetch failed for upcoming matches:', apiError?.message || apiError);
+        }
         // Continue to fallback logic
       }
     }
 
     // Fallback to database if API config is missing or API call failed
     console.log('Falling back to database for upcoming matches');
-    const dbMatches = await Match.find({ 
+    const dbMatches = await Match.find({
       $and: [
         {
           $or: [
@@ -204,7 +214,7 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
             { status: { $regex: 'Upcoming', $options: 'i' } },
             { status: { $regex: 'Scheduled', $options: 'i' } },
             { status: { $regex: 'scheduled', $options: 'i' } },
-            { 
+            {
               startDate: { $gte: new Date() },
               status: { $nin: ['COMPLETED', 'Complete', 'complete', 'Finished', 'finished', 'LIVE', 'Live', 'live'] }
             }
@@ -215,10 +225,10 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
         }
       ]
     })
-    .sort({ startDate: 1 })
-    .limit(Number(limit))
-    .select('matchId title shortTitle teams venue series startDate format status raw');
-    
+      .sort({ startDate: 1 })
+      .limit(Number(limit))
+      .select('matchId title shortTitle teams venue series startDate format status raw');
+
     // Process matches to extract data from raw field if needed
     const processedMatches = dbMatches.map(match => {
       // If the match doesn't have proper data but has raw data, extract from raw
@@ -227,17 +237,17 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
       }
       return match;
     });
-    
+
     return res.json(processedMatches);
   } catch (error) {
     console.error('getUpcomingMatches error:', error);
-    
+
     // Handle rate limiting
     if ((error as any)?.response?.status === 429) {
       // Fallback to database if API rate limit exceeded
       try {
         const { limit = 10 } = req.query;
-        const upcomingMatches = await Match.find({ 
+        const upcomingMatches = await Match.find({
           $and: [
             {
               $or: [
@@ -246,7 +256,7 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
                 { status: { $regex: 'Upcoming', $options: 'i' } },
                 { status: { $regex: 'Scheduled', $options: 'i' } },
                 { status: { $regex: 'scheduled', $options: 'i' } },
-                { 
+                {
                   startDate: { $gte: new Date() },
                   status: { $nin: ['COMPLETED', 'Complete', 'complete', 'Finished', 'finished'] }
                 }
@@ -257,20 +267,20 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
             }
           ]
         })
-        .sort({ startDate: 1 })
-        .limit(Number(limit))
-        .select('matchId title shortTitle teams venue series startDate format status');
-        
+          .sort({ startDate: 1 })
+          .limit(Number(limit))
+          .select('matchId title shortTitle teams venue series startDate format status');
+
         return res.json(upcomingMatches);
       } catch (dbError) {
         return res.status(500).json({ message: 'Server error', error: (dbError as Error).message });
       }
     }
-    
+
     // Fallback to database if API fails
     try {
       const { limit = 10 } = req.query;
-      const upcomingMatches = await Match.find({ 
+      const upcomingMatches = await Match.find({
         $and: [
           {
             $or: [
@@ -279,7 +289,7 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
               { status: { $regex: 'Upcoming', $options: 'i' } },
               { status: { $regex: 'Scheduled', $options: 'i' } },
               { status: { $regex: 'scheduled', $options: 'i' } },
-              { 
+              {
                 startDate: { $gte: new Date() },
                 status: { $nin: ['COMPLETED', 'Complete', 'complete', 'Finished', 'finished'] }
               }
@@ -290,10 +300,10 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
           }
         ]
       })
-      .sort({ startDate: 1 })
-      .limit(Number(limit))
-      .select('matchId title shortTitle teams venue series startDate format status');
-      
+        .sort({ startDate: 1 })
+        .limit(Number(limit))
+        .select('matchId title shortTitle teams venue series startDate format status');
+
       res.json(upcomingMatches);
     } catch (dbError) {
       res.status(500).json({ message: 'Server error', error: (dbError as Error).message });

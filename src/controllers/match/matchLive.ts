@@ -80,8 +80,11 @@ export const getLiveMatches = async (req: Request, res: Response) => {
     const RAPIDAPI_MATCHES_LIVE_URL = process.env.RAPIDAPI_MATCHES_LIVE_URL;
     const RAPIDAPI_MATCHES_INFO_URL = process.env.RAPIDAPI_MATCHES_INFO_URL;
 
-    // If API key is available, try to fetch from API first
-    if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_LIVE_URL) {
+    // Import feature flags
+    const { isFeatureEnabled } = await import('../../config/apiConfig');
+
+    // If API key is available and feature is enabled, try to fetch from API first
+    if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_LIVE_URL && isFeatureEnabled('ENABLE_LIVE_MATCHES_API')) {
       try {
         console.log('Fetching live matches from API');
         const headers = {
@@ -89,10 +92,11 @@ export const getLiveMatches = async (req: Request, res: Response) => {
           'x-rapidapi-host': RAPIDAPI_HOST
         };
 
-        const response = await axios.get(RAPIDAPI_MATCHES_LIVE_URL, { headers, timeout: 15000 });
+        const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
+        const response = await rapidApiRateLimiter.makeRequest(RAPIDAPI_MATCHES_LIVE_URL, { headers }) as any;
 
         // Process API response and save to database
-        if (response.data && response.data.typeMatches) {
+        if (response && response.typeMatches) {
           console.log('Available match types:', response.data.typeMatches.map((t: any) => t.matchType));
 
           const liveMatchesData = response.data.typeMatches.find((type: any) =>
@@ -294,10 +298,10 @@ export const getLiveMatches = async (req: Request, res: Response) => {
               );
             });
 
-            // Filter out null results and execute valid upserts
+            // Process and return fresh API data directly
             const validUpserts = upsertPromises.filter(promise => promise !== null);
-            await Promise.all(validUpserts);
-            console.log(`Saved ${validUpserts.length} valid matches out of ${upsertPromises.length} total`);
+            const freshMatches = await Promise.all(validUpserts);
+            console.log(`Processed ${freshMatches.length} valid matches from API`);
 
             // Return from database after saving
             const liveMatches = await Match.find({
@@ -317,7 +321,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                 },
                 {
                   // Exclude completed, abandoned, and cancelled matches
-                  status: { 
+                  status: {
                     $nin: [
                       'COMPLETED', 'Complete', 'COMPLETE', 'Completed',
                       'ABANDONED', 'Abandoned', 'ABANDON', 'Abandon',
@@ -331,7 +335,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                       'Tied', 'TIED', 'Tie', 'TIE',
                       'No Result', 'NO RESULT', 'No result', 'no result',
                       'Result', 'RESULT'
-                    ] 
+                    ]
                   }
                 },
                 {
@@ -348,7 +352,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
               .select('matchId title shortTitle teams venue series status commentary currentlyPlaying isLive format startDate endDate raw scorecard');
 
             // Process matches to extract data from raw field if needed and update scores from scorecard
-            const processedMatches = await Promise.all(liveMatches.map(async match => {
+            const updatedMatches = await Promise.all(liveMatches.map(async match => {
               console.log(`Processing match ${match.matchId}: status="${match.status}", isLive=${match.isLive}, startDate=${match.startDate}`);
 
               // Check if match should be live based on time
@@ -370,7 +374,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
               if (match.scorecard && match.scorecard.scorecard && Array.isArray(match.scorecard.scorecard)) {
                 console.log(`Extracting scores from scorecard for match ${match.matchId}`);
                 const { team1Score, team2Score } = extractScoresFromScorecard(match.scorecard);
-                
+
                 // Update team scores if we have valid data
                 if (processedMatch.teams && processedMatch.teams.length >= 2) {
                   // Only update if we have actual scores (not all zeros)
@@ -382,11 +386,11 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                 }
               }
               // If we don't have scorecard data or scores are still zero, try to fetch scorecard
-              else if ((!match.scorecard || match.teams.some(team => 
-                  !team.score || 
-                  (team.score.runs === 0 && team.score.wickets === 0 && team.score.overs === 0))) && 
-                  RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_INFO_URL) {
-                
+              else if ((!match.scorecard || match.teams.some(team =>
+                !team.score ||
+                (team.score.runs === 0 && team.score.wickets === 0 && team.score.overs === 0))) &&
+                RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_INFO_URL) {
+
                 try {
                   console.log(`Fetching scorecard for match ${match.matchId}`);
                   const headers = {
@@ -396,11 +400,12 @@ export const getLiveMatches = async (req: Request, res: Response) => {
 
                   // Try to fetch match scorecard from Cricbuzz API
                   const url = `${RAPIDAPI_MATCHES_INFO_URL}/${match.matchId}/scard`;
-                  const scorecardResponse = await axios.get(url, { headers, timeout: 10000 });
+                  const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
+                  const scorecardResponse = await rapidApiRateLimiter.makeRequest(url, { headers }) as any;
 
-                  if (scorecardResponse.data) {
+                  if (scorecardResponse) {
                     console.log(`Scorecard fetched for match ${match.matchId}`);
-                    
+
                     // Map status to valid enum value before saving
                     let updatedStatus = match.status;
                     if (match.raw && match.raw.state) {
@@ -408,14 +413,14 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                     } else if (match.raw && match.raw.status) {
                       updatedStatus = mapStatusToEnum(match.raw.status);
                     }
-                    
+
                     // Store scorecard data in database
-                    const updateData: any = { 
-                      scorecard: scorecardResponse.data,
+                    const updateData: any = {
+                      scorecard: scorecardResponse,
                       status: updatedStatus,
                       isLive: updatedStatus === 'LIVE'
                     };
-                    
+
                     const updatedMatch = await Match.findOneAndUpdate(
                       { matchId: match.matchId },
                       { $set: updateData },
@@ -424,13 +429,13 @@ export const getLiveMatches = async (req: Request, res: Response) => {
 
                     if (updatedMatch) {
                       // Extract scores from scorecard
-                      const { team1Score, team2Score } = extractScoresFromScorecard(scorecardResponse.data);
-                      
+                      const { team1Score, team2Score } = extractScoresFromScorecard(scorecardResponse);
+
                       // Update team scores
                       if (updatedMatch.teams && updatedMatch.teams.length >= 2) {
                         updatedMatch.teams[0].score = team1Score;
                         updatedMatch.teams[1].score = team2Score;
-                        
+
                         // Save updated scores
                         try {
                           await updatedMatch.save();
@@ -441,10 +446,12 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                           try {
                             await Match.findOneAndUpdate(
                               { matchId: match.matchId },
-                              { $set: { 
-                                "teams.0.score": team1Score,
-                                "teams.1.score": team2Score
-                              } },
+                              {
+                                $set: {
+                                  "teams.0.score": team1Score,
+                                  "teams.1.score": team2Score
+                                }
+                              },
                               { new: true }
                             );
                             console.log(`Updated scores via findOneAndUpdate for match ${match.matchId}: Team1=${team1Score.runs}/${team1Score.wickets}, Team2=${team2Score.runs}/${team2Score.wickets}`);
@@ -452,7 +459,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                             console.error(`Error updating scores via findOneAndUpdate for match ${match.matchId}:`, updateError);
                           }
                         }
-                        
+
                         processedMatch = updatedMatch;
                       }
                     }
@@ -483,8 +490,8 @@ export const getLiveMatches = async (req: Request, res: Response) => {
               return processedMatch;
             }));
 
-            console.log(`Found ${processedMatches.length} live matches from database`);
-            return res.json(processedMatches);
+            console.log(`Found ${updatedMatches.length} live matches from database`);
+            return res.json(updatedMatches);
           }
         }
       } catch (apiError) {
@@ -511,7 +518,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
         },
         {
           // Exclude completed, abandoned, and cancelled matches
-          status: { 
+          status: {
             $nin: [
               'COMPLETED', 'Complete', 'COMPLETE', 'Completed',
               'ABANDONED', 'Abandoned', 'ABANDON', 'Abandon',
@@ -525,7 +532,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
               'Tied', 'TIED', 'Tie', 'TIE',
               'No Result', 'NO RESULT', 'No result', 'no result',
               'Result', 'RESULT'
-            ] 
+            ]
           }
         },
         {
@@ -545,30 +552,30 @@ export const getLiveMatches = async (req: Request, res: Response) => {
     const uniqueMatches = liveMatches.filter((match, index, self) =>
       index === self.findIndex((m) => m.matchId === match.matchId)
     );
-    
+
     // Additional deduplication based on title and teams to catch edge cases
     const deduplicatedMatches = uniqueMatches.filter((match, index, self) => {
       // Check if teams exist and have the required properties
-      if (!match.teams || match.teams.length < 2 || 
-          !match.teams[0] || !match.teams[1] || 
-          !match.teams[0].teamName || !match.teams[1].teamName) {
+      if (!match.teams || match.teams.length < 2 ||
+        !match.teams[0] || !match.teams[1] ||
+        !match.teams[0].teamName || !match.teams[1].teamName) {
         // If teams are not properly defined, keep the first occurrence
         return self.findIndex((m) => m.title === match.title) === index;
       }
-      
-      const isDuplicate = self.findIndex((m) => 
-        m.title === match.title && 
+
+      const isDuplicate = self.findIndex((m) =>
+        m.title === match.title &&
         m.teams && m.teams.length >= 2 &&
         m.teams[0] && m.teams[1] &&
         m.teams[0].teamName === match.teams[0].teamName &&
         m.teams[1].teamName === match.teams[1].teamName
       ) !== index;
-      
+
       return !isDuplicate;
     });
 
     // Process matches to extract data from raw field if needed and update scores from scorecard
-    const processedMatches = await Promise.all(deduplicatedMatches.map(async match => {
+    const finalMatches = await Promise.all(deduplicatedMatches.map(async match => {
       console.log(`Processing match ${match.matchId}: status="${match.status}", isLive=${match.isLive}, startDate=${match.startDate}, endDate=${match.endDate}`);
 
       // Check if match should be live based on time
@@ -590,7 +597,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
       if (match.scorecard && match.scorecard.scorecard && Array.isArray(match.scorecard.scorecard)) {
         console.log(`Extracting scores from scorecard for match ${match.matchId}`);
         const { team1Score, team2Score } = extractScoresFromScorecard(match.scorecard);
-        
+
         // Update team scores if we have valid data
         if (processedMatch.teams && processedMatch.teams.length >= 2) {
           // Only update if we have actual scores (not all zeros)
@@ -602,11 +609,11 @@ export const getLiveMatches = async (req: Request, res: Response) => {
         }
       }
       // If we don't have scorecard data or scores are still zero, try to fetch scorecard
-      else if ((!match.scorecard || match.teams.some(team => 
-          !team.score || 
-          (team.score.runs === 0 && team.score.wickets === 0 && team.score.overs === 0))) && 
-          RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_INFO_URL) {
-        
+      else if ((!match.scorecard || match.teams.some(team =>
+        !team.score ||
+        (team.score.runs === 0 && team.score.wickets === 0 && team.score.overs === 0))) &&
+        RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_INFO_URL) {
+
         try {
           console.log(`Fetching scorecard for match ${match.matchId}`);
           const headers = {
@@ -616,11 +623,12 @@ export const getLiveMatches = async (req: Request, res: Response) => {
 
           // Try to fetch match scorecard from Cricbuzz API
           const url = `${RAPIDAPI_MATCHES_INFO_URL}/${match.matchId}/scard`;
-          const scorecardResponse = await axios.get(url, { headers, timeout: 10000 });
+          const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
+          const scorecardResponse = await rapidApiRateLimiter.makeRequest(url, { headers }) as any;
 
-          if (scorecardResponse.data) {
+          if (scorecardResponse) {
             console.log(`Scorecard fetched for match ${match.matchId}`);
-            
+
             // Map status to valid enum value before saving
             let updatedStatus = match.status;
             if (match.raw && match.raw.state) {
@@ -628,14 +636,14 @@ export const getLiveMatches = async (req: Request, res: Response) => {
             } else if (match.raw && match.raw.status) {
               updatedStatus = mapStatusToEnum(match.raw.status);
             }
-            
+
             // Store scorecard data in database
-            const updateData: any = { 
-              scorecard: scorecardResponse.data,
+            const updateData: any = {
+              scorecard: scorecardResponse,
               status: updatedStatus,
               isLive: updatedStatus === 'LIVE'
             };
-            
+
             const updatedMatch = await Match.findOneAndUpdate(
               { matchId: match.matchId },
               { $set: updateData },
@@ -644,13 +652,13 @@ export const getLiveMatches = async (req: Request, res: Response) => {
 
             if (updatedMatch) {
               // Extract scores from scorecard
-              const { team1Score, team2Score } = extractScoresFromScorecard(scorecardResponse.data);
-              
+              const { team1Score, team2Score } = extractScoresFromScorecard(scorecardResponse);
+
               // Update team scores
               if (updatedMatch.teams && updatedMatch.teams.length >= 2) {
                 updatedMatch.teams[0].score = team1Score;
                 updatedMatch.teams[1].score = team2Score;
-                
+
                 // Save updated scores
                 try {
                   await updatedMatch.save();
@@ -661,10 +669,12 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                   try {
                     await Match.findOneAndUpdate(
                       { matchId: match.matchId },
-                      { $set: { 
-                        "teams.0.score": team1Score,
-                        "teams.1.score": team2Score
-                      } },
+                      {
+                        $set: {
+                          "teams.0.score": team1Score,
+                          "teams.1.score": team2Score
+                        }
+                      },
                       { new: true }
                     );
                     console.log(`Updated scores via findOneAndUpdate for match ${match.matchId}: Team1=${team1Score.runs}/${team1Score.wickets}, Team2=${team2Score.runs}/${team2Score.wickets}`);
@@ -672,7 +682,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                     console.error(`Error updating scores via findOneAndUpdate for match ${match.matchId}:`, updateError);
                   }
                 }
-                
+
                 processedMatch = updatedMatch;
               }
             }
@@ -704,16 +714,16 @@ export const getLiveMatches = async (req: Request, res: Response) => {
     }));
 
     // Filter out matches that have actually ended
-    const actuallyLiveMatches = processedMatches.filter(match => {
+    const actuallyLiveMatches = finalMatches.filter(match => {
       // Check if match has ended more than 48 hours ago
       if (match.endDate && match.endDate < new Date(Date.now() - 48 * 60 * 60 * 1000)) {
         console.log(`Filtering out match ${match.matchId} - ended more than 48 hours ago`);
         return false;
       }
-      
+
       // Check if match status indicates it's completed
       const lowerStatus = (match.status || '').toLowerCase();
-      const isCompleted = 
+      const isCompleted =
         lowerStatus.includes('complete') ||
         lowerStatus.includes('finished') ||
         lowerStatus.includes('won') ||
@@ -726,27 +736,27 @@ export const getLiveMatches = async (req: Request, res: Response) => {
         match.status === 'COMPLETED' ||
         match.status === 'ABANDONED' ||
         match.status === 'CANCELLED';
-        
+
       if (isCompleted) {
         console.log(`Filtering out match ${match.matchId} - marked as completed`);
         return false;
       }
-      
+
       // Additional check: if both teams have zero scores and match ended more than 24 hours ago, it's likely completed
       const team1Score = match.teams?.[0]?.score || { runs: 0, wickets: 0 };
       const team2Score = match.teams?.[1]?.score || { runs: 0, wickets: 0 };
-      const bothTeamsZeroScore = (team1Score.runs === 0 && team1Score.wickets === 0) && 
-                                (team2Score.runs === 0 && team2Score.wickets === 0);
-      
+      const bothTeamsZeroScore = (team1Score.runs === 0 && team1Score.wickets === 0) &&
+        (team2Score.runs === 0 && team2Score.wickets === 0);
+
       if (bothTeamsZeroScore && match.endDate && match.endDate < new Date(Date.now() - 24 * 60 * 60 * 1000)) {
         console.log(`Filtering out match ${match.matchId} - zero scores and ended more than 24 hours ago`);
         return false;
       }
-      
+
       return true;
     });
 
-    console.log(`Found ${actuallyLiveMatches.length} actually live matches from database (filtered from ${processedMatches.length})`);
+    console.log(`Found ${actuallyLiveMatches.length} actually live matches from database (filtered from ${finalMatches.length})`);
     return res.json(actuallyLiveMatches);
   } catch (error) {
     console.error('getLiveMatches error:', error);
@@ -772,7 +782,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
             },
             {
               // Exclude completed, abandoned, and cancelled matches
-              status: { 
+              status: {
                 $nin: [
                   'COMPLETED', 'Complete', 'COMPLETE', 'Completed',
                   'ABANDONED', 'Abandoned', 'ABANDON', 'Abandon',
@@ -786,7 +796,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                   'Tied', 'TIED', 'Tie', 'TIE',
                   'No Result', 'NO RESULT', 'No result', 'no result',
                   'Result', 'RESULT'
-                ] 
+                ]
               }
             },
             {
@@ -806,25 +816,25 @@ export const getLiveMatches = async (req: Request, res: Response) => {
         const uniqueMatches = liveMatches.filter((match, index, self) =>
           index === self.findIndex((m) => m.matchId === match.matchId)
         );
-        
+
         // Additional deduplication based on title and teams to catch edge cases
         const deduplicatedMatches = uniqueMatches.filter((match, index, self) => {
           // Check if teams exist and have the required properties
-          if (!match.teams || match.teams.length < 2 || 
-              !match.teams[0] || !match.teams[1] || 
-              !match.teams[0].teamName || !match.teams[1].teamName) {
+          if (!match.teams || match.teams.length < 2 ||
+            !match.teams[0] || !match.teams[1] ||
+            !match.teams[0].teamName || !match.teams[1].teamName) {
             // If teams are not properly defined, keep the first occurrence
             return self.findIndex((m) => m.title === match.title) === index;
           }
-          
-          const isDuplicate = self.findIndex((m) => 
-            m.title === match.title && 
+
+          const isDuplicate = self.findIndex((m) =>
+            m.title === match.title &&
             m.teams && m.teams.length >= 2 &&
             m.teams[0] && m.teams[1] &&
             m.teams[0].teamName === match.teams[0].teamName &&
             m.teams[1].teamName === match.teams[1].teamName
           ) !== index;
-          
+
           return !isDuplicate;
         });
 
@@ -853,7 +863,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
           },
           {
             // Exclude completed, abandoned, and cancelled matches
-            status: { 
+            status: {
               $nin: [
                 'COMPLETED', 'Complete', 'COMPLETE', 'Completed',
                 'ABANDONED', 'Abandoned', 'ABANDON', 'Abandon',
@@ -867,7 +877,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                 'Tied', 'TIED', 'Tie', 'TIE',
                 'No Result', 'NO RESULT', 'No result', 'no result',
                 'Result', 'RESULT'
-              ] 
+              ]
             }
           },
           {
@@ -887,25 +897,25 @@ export const getLiveMatches = async (req: Request, res: Response) => {
       const uniqueMatches = liveMatches.filter((match, index, self) =>
         index === self.findIndex((m) => m.matchId === match.matchId)
       );
-      
+
       // Additional deduplication based on title and teams to catch edge cases
       const deduplicatedMatches = uniqueMatches.filter((match, index, self) => {
         // Check if teams exist and have the required properties
-        if (!match.teams || match.teams.length < 2 || 
-            !match.teams[0] || !match.teams[1] || 
-            !match.teams[0].teamName || !match.teams[1].teamName) {
+        if (!match.teams || match.teams.length < 2 ||
+          !match.teams[0] || !match.teams[1] ||
+          !match.teams[0].teamName || !match.teams[1].teamName) {
           // If teams are not properly defined, keep the first occurrence
           return self.findIndex((m) => m.title === match.title) === index;
         }
-        
-        const isDuplicate = self.findIndex((m) => 
-          m.title === match.title && 
+
+        const isDuplicate = self.findIndex((m) =>
+          m.title === match.title &&
           m.teams && m.teams.length >= 2 &&
           m.teams[0] && m.teams[1] &&
           m.teams[0].teamName === match.teams[0].teamName &&
           m.teams[1].teamName === match.teams[1].teamName
         ) !== index;
-        
+
         return !isDuplicate;
       });
 

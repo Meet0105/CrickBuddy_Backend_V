@@ -30,8 +30,11 @@ export const getRecentMatches = async (req: Request, res: Response) => {
     const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
     const RAPIDAPI_MATCHES_RECENT_URL = process.env.RAPIDAPI_MATCHES_RECENT_URL;
 
-    // If API key is available, try to fetch from API first
-    if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_RECENT_URL) {
+    // Import feature flags
+    const { isFeatureEnabled } = await import('../../config/apiConfig');
+
+    // If API key is available and feature is enabled, try to fetch from API first
+    if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_RECENT_URL && isFeatureEnabled('ENABLE_RECENT_MATCHES_API')) {
       try {
         console.log('Fetching recent matches from API');
         const headers = {
@@ -39,11 +42,12 @@ export const getRecentMatches = async (req: Request, res: Response) => {
           'x-rapidapi-host': RAPIDAPI_HOST
         };
 
-        const response = await axios.get(RAPIDAPI_MATCHES_RECENT_URL, { headers, timeout: 15000 });
+        const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
+        const response = await rapidApiRateLimiter.makeRequest(RAPIDAPI_MATCHES_RECENT_URL, { headers }) as any;
 
         // Process API response and save to database
-        if (response.data && response.data.typeMatches) {
-          const recentMatchesData = response.data.typeMatches.find((type: any) => 
+        if (response && response.typeMatches) {
+          const recentMatchesData = response.typeMatches.find((type: any) => 
             type.matchType === 'Recent Matches'
           );
 

@@ -1,11 +1,43 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.syncSeriesFromRapidAPI = exports.updateSeriesData = void 0;
 const Series_1 = __importDefault(require("../../models/Series"));
-const axios_1 = __importDefault(require("axios"));
 // Function to update a specific series with fresh data
 const updateSeriesData = async (req, res) => {
     try {
@@ -33,11 +65,11 @@ const updateSeriesData = async (req, res) => {
         if (RAPIDAPI_SERIES_MATCHES_URL) {
             try {
                 const matchesUrl = RAPIDAPI_SERIES_MATCHES_URL.replace('3641', id);
-                console.log('Updating series schedule from:', matchesUrl);
-                const matchesResponse = await axios_1.default.get(matchesUrl, { headers, timeout: 15000 });
+                const { rapidApiRateLimiter } = await Promise.resolve().then(() => __importStar(require('../../utils/rateLimiter')));
+                const matchesResponse = await rapidApiRateLimiter.makeRequest(matchesUrl, { headers });
                 let schedule = [];
-                if (matchesResponse.data && matchesResponse.data.matchDetails) {
-                    matchesResponse.data.matchDetails.forEach((matchDetail) => {
+                if (matchesResponse && matchesResponse.matchDetails) {
+                    matchesResponse.matchDetails.forEach((matchDetail) => {
                         if (matchDetail.matchDetailsMap && matchDetail.matchDetailsMap.match) {
                             matchDetail.matchDetailsMap.match.forEach((match) => {
                                 var _a, _b, _c, _d, _e, _f;
@@ -78,25 +110,25 @@ const updateSeriesData = async (req, res) => {
         if (RAPIDAPI_SERIES_POINTS_TABLE_URL) {
             try {
                 const pointsUrl = RAPIDAPI_SERIES_POINTS_TABLE_URL.replace('3718', id);
-                console.log('Updating points table from:', pointsUrl);
-                const pointsResponse = await axios_1.default.get(pointsUrl, { headers, timeout: 15000 });
+                const { rapidApiRateLimiter } = await Promise.resolve().then(() => __importStar(require('../../utils/rateLimiter')));
+                const pointsResponse = await rapidApiRateLimiter.makeRequest(pointsUrl, { headers });
                 let pointsTable = [];
-                if (pointsResponse.data) {
+                if (pointsResponse) {
                     // Try multiple possible response structures
                     let tableData = null;
-                    if (pointsResponse.data.pointsTable) {
-                        if (Array.isArray(pointsResponse.data.pointsTable)) {
-                            tableData = pointsResponse.data.pointsTable[0];
+                    if (pointsResponse.pointsTable) {
+                        if (Array.isArray(pointsResponse.pointsTable)) {
+                            tableData = pointsResponse.pointsTable[0];
                         }
                         else {
-                            tableData = pointsResponse.data.pointsTable;
+                            tableData = pointsResponse.pointsTable;
                         }
                     }
-                    else if (pointsResponse.data.table) {
-                        tableData = pointsResponse.data.table;
+                    else if (pointsResponse.table) {
+                        tableData = pointsResponse.table;
                     }
-                    else if (pointsResponse.data.standings) {
-                        tableData = pointsResponse.data.standings;
+                    else if (pointsResponse.standings) {
+                        tableData = pointsResponse.standings;
                     }
                     if (tableData) {
                         let teamData = tableData.pointsTableInfo || tableData.teams || tableData;
@@ -144,28 +176,28 @@ const updateSeriesData = async (req, res) => {
             try {
                 const baseUrl = RAPIDAPI_SERIES_SQUADS_URL.replace(/\/\d+\/squads$/, '');
                 const squadsUrl = `${baseUrl}/${id}/squads`;
-                console.log('Updating squads from:', squadsUrl);
-                const squadsResponse = await axios_1.default.get(squadsUrl, { headers, timeout: 15000 });
+                const { rapidApiRateLimiter } = await Promise.resolve().then(() => __importStar(require('../../utils/rateLimiter')));
+                const squadsResponse = await rapidApiRateLimiter.makeRequest(squadsUrl, { headers });
                 // Debug: Log the actual API response to see the real structure
-                console.log('🔍 SQUADS API RESPONSE:', JSON.stringify(squadsResponse.data, null, 2));
+                console.log('🔍 SQUADS API RESPONSE:', JSON.stringify(squadsResponse, null, 2));
                 let squads = [];
                 // Try multiple possible response structures
                 let squadData = null;
-                if (squadsResponse.data && squadsResponse.data.squads) {
-                    console.log('✅ Found squads in response.data.squads');
-                    squadData = squadsResponse.data.squads;
+                if (squadsResponse && squadsResponse.squads) {
+                    console.log('✅ Found squads in response.squads');
+                    squadData = squadsResponse.squads;
                 }
-                else if (squadsResponse.data && Array.isArray(squadsResponse.data)) {
+                else if (squadsResponse && Array.isArray(squadsResponse)) {
                     console.log('✅ Found squads as direct array');
-                    squadData = squadsResponse.data;
+                    squadData = squadsResponse;
                 }
-                else if (squadsResponse.data && squadsResponse.data.squad) {
-                    console.log('✅ Found squads in response.data.squad');
-                    squadData = squadsResponse.data.squad;
+                else if (squadsResponse && squadsResponse.squad) {
+                    console.log('✅ Found squads in response.squad');
+                    squadData = squadsResponse.squad;
                 }
                 else {
                     console.log('❌ No recognizable squad data structure found');
-                    console.log('Available keys:', Object.keys(squadsResponse.data || {}));
+                    console.log('Available keys:', Object.keys(squadsResponse || {}));
                 }
                 if (squadData && Array.isArray(squadData)) {
                     console.log(`📋 Processing ${squadData.length} squads`);
@@ -315,25 +347,32 @@ const syncSeriesFromRapidAPI = async (req, res) => {
             'x-rapidapi-host': RAPIDAPI_HOST
         };
         // Try to fetch series from Cricbuzz API
-        const response = await axios_1.default.get(RAPIDAPI_SERIES_LIST_URL, { headers, timeout: 15000 });
+        const { rapidApiRateLimiter } = await Promise.resolve().then(() => __importStar(require('../../utils/rateLimiter')));
+        const response = await rapidApiRateLimiter.makeRequest(RAPIDAPI_SERIES_LIST_URL, { headers });
+        if (!response) {
+            return res.status(429).json({
+                message: 'API rate limit exceeded or request failed. Please try again later.',
+                error: 'Too many requests or API unavailable'
+            });
+        }
         let seriesList = [];
         // Handle different response structures from RapidAPI
-        if (response.data && response.data.seriesMapProto) {
+        if (response && response.seriesMapProto) {
             // Extract series from seriesMapProto structure
-            for (const seriesProto of response.data.seriesMapProto) {
+            for (const seriesProto of response.seriesMapProto) {
                 if (seriesProto.series && Array.isArray(seriesProto.series)) {
                     seriesList.push(...seriesProto.series);
                 }
             }
         }
-        else if (Array.isArray(response.data)) {
-            seriesList = response.data;
+        else if (Array.isArray(response)) {
+            seriesList = response;
         }
-        else if (response.data.series) {
-            seriesList = response.data.series;
+        else if (response && response.series) {
+            seriesList = response.series;
         }
         else {
-            const values = Object.values(response.data || {});
+            const values = Object.values(response || {});
             const arr = values.find((v) => Array.isArray(v) && v.length && typeof v[0] === 'object');
             if (arr)
                 seriesList = arr;
@@ -341,7 +380,7 @@ const syncSeriesFromRapidAPI = async (req, res) => {
         if (!seriesList || !seriesList.length) {
             return res.status(500).json({
                 message: 'No series array found in RapidAPI response. Inspect provider response.',
-                providerResponseSample: response.data
+                providerResponseSample: response
             });
         }
         const upsertPromises = seriesList.map(async (s) => {

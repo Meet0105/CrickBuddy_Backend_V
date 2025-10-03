@@ -1,11 +1,43 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getLiveMatches = void 0;
 const Match_1 = __importDefault(require("../../models/Match"));
-const axios_1 = __importDefault(require("axios"));
 const matchLiveHelpers_1 = require("./matchLiveHelpers");
 // Helper function to map API status to our enum values
 const mapStatusToEnum = (status) => {
@@ -76,17 +108,20 @@ const getLiveMatches = async (req, res) => {
         const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
         const RAPIDAPI_MATCHES_LIVE_URL = process.env.RAPIDAPI_MATCHES_LIVE_URL;
         const RAPIDAPI_MATCHES_INFO_URL = process.env.RAPIDAPI_MATCHES_INFO_URL;
-        // If API key is available, try to fetch from API first
-        if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_LIVE_URL) {
+        // Import feature flags
+        const { isFeatureEnabled } = await Promise.resolve().then(() => __importStar(require('../../config/apiConfig')));
+        // If API key is available and feature is enabled, try to fetch from API first
+        if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_LIVE_URL && isFeatureEnabled('ENABLE_LIVE_MATCHES_API')) {
             try {
                 console.log('Fetching live matches from API');
                 const headers = {
                     'x-rapidapi-key': RAPIDAPI_KEY,
                     'x-rapidapi-host': RAPIDAPI_HOST
                 };
-                const response = await axios_1.default.get(RAPIDAPI_MATCHES_LIVE_URL, { headers, timeout: 15000 });
+                const { rapidApiRateLimiter } = await Promise.resolve().then(() => __importStar(require('../../utils/rateLimiter')));
+                const response = await rapidApiRateLimiter.makeRequest(RAPIDAPI_MATCHES_LIVE_URL, { headers });
                 // Process API response and save to database
-                if (response.data && response.data.typeMatches) {
+                if (response && response.typeMatches) {
                     console.log('Available match types:', response.data.typeMatches.map((t) => t.matchType));
                     const liveMatchesData = response.data.typeMatches.find((type) => type.matchType === 'Live Matches');
                     // Also check for matches that should be live based on time
@@ -247,10 +282,10 @@ const getLiveMatches = async (req, res) => {
                             Object.keys(doc).forEach((k) => doc[k] === undefined && delete doc[k]);
                             return Match_1.default.findOneAndUpdate({ matchId: safeMatchId }, { $set: { ...doc, matchId: safeMatchId } }, { upsert: true, new: true, setDefaultsOnInsert: true });
                         });
-                        // Filter out null results and execute valid upserts
+                        // Process and return fresh API data directly
                         const validUpserts = upsertPromises.filter(promise => promise !== null);
-                        await Promise.all(validUpserts);
-                        console.log(`Saved ${validUpserts.length} valid matches out of ${upsertPromises.length} total`);
+                        const freshMatches = await Promise.all(validUpserts);
+                        console.log(`Processed ${freshMatches.length} valid matches from API`);
                         // Return from database after saving
                         const liveMatches = await Match_1.default.find({
                             $and: [
@@ -299,7 +334,7 @@ const getLiveMatches = async (req, res) => {
                             .sort({ priority: -1, startDate: -1 })
                             .select('matchId title shortTitle teams venue series status commentary currentlyPlaying isLive format startDate endDate raw scorecard');
                         // Process matches to extract data from raw field if needed and update scores from scorecard
-                        const processedMatches = await Promise.all(liveMatches.map(async (match) => {
+                        const updatedMatches = await Promise.all(liveMatches.map(async (match) => {
                             var _a;
                             console.log(`Processing match ${match.matchId}: status="${match.status}", isLive=${match.isLive}, startDate=${match.startDate}`);
                             // Check if match should be live based on time
@@ -340,8 +375,9 @@ const getLiveMatches = async (req, res) => {
                                     };
                                     // Try to fetch match scorecard from Cricbuzz API
                                     const url = `${RAPIDAPI_MATCHES_INFO_URL}/${match.matchId}/scard`;
-                                    const scorecardResponse = await axios_1.default.get(url, { headers, timeout: 10000 });
-                                    if (scorecardResponse.data) {
+                                    const { rapidApiRateLimiter } = await Promise.resolve().then(() => __importStar(require('../../utils/rateLimiter')));
+                                    const scorecardResponse = await rapidApiRateLimiter.makeRequest(url, { headers });
+                                    if (scorecardResponse) {
                                         console.log(`Scorecard fetched for match ${match.matchId}`);
                                         // Map status to valid enum value before saving
                                         let updatedStatus = match.status;
@@ -353,14 +389,14 @@ const getLiveMatches = async (req, res) => {
                                         }
                                         // Store scorecard data in database
                                         const updateData = {
-                                            scorecard: scorecardResponse.data,
+                                            scorecard: scorecardResponse,
                                             status: updatedStatus,
                                             isLive: updatedStatus === 'LIVE'
                                         };
                                         const updatedMatch = await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, { $set: updateData }, { new: true });
                                         if (updatedMatch) {
                                             // Extract scores from scorecard
-                                            const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(scorecardResponse.data);
+                                            const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(scorecardResponse);
                                             // Update team scores
                                             if (updatedMatch.teams && updatedMatch.teams.length >= 2) {
                                                 updatedMatch.teams[0].score = team1Score;
@@ -374,10 +410,12 @@ const getLiveMatches = async (req, res) => {
                                                     console.error(`Error saving updated scores for match ${match.matchId}:`, saveError);
                                                     // If save fails, try to update just the teams
                                                     try {
-                                                        await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, { $set: {
+                                                        await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, {
+                                                            $set: {
                                                                 "teams.0.score": team1Score,
                                                                 "teams.1.score": team2Score
-                                                            } }, { new: true });
+                                                            }
+                                                        }, { new: true });
                                                         console.log(`Updated scores via findOneAndUpdate for match ${match.matchId}: Team1=${team1Score.runs}/${team1Score.wickets}, Team2=${team2Score.runs}/${team2Score.wickets}`);
                                                     }
                                                     catch (updateError) {
@@ -407,8 +445,8 @@ const getLiveMatches = async (req, res) => {
                             }
                             return processedMatch;
                         }));
-                        console.log(`Found ${processedMatches.length} live matches from database`);
-                        return res.json(processedMatches);
+                        console.log(`Found ${updatedMatches.length} live matches from database`);
+                        return res.json(updatedMatches);
                     }
                 }
             }
@@ -483,7 +521,7 @@ const getLiveMatches = async (req, res) => {
             return !isDuplicate;
         });
         // Process matches to extract data from raw field if needed and update scores from scorecard
-        const processedMatches = await Promise.all(deduplicatedMatches.map(async (match) => {
+        const finalMatches = await Promise.all(deduplicatedMatches.map(async (match) => {
             var _a;
             console.log(`Processing match ${match.matchId}: status="${match.status}", isLive=${match.isLive}, startDate=${match.startDate}, endDate=${match.endDate}`);
             // Check if match should be live based on time
@@ -524,8 +562,9 @@ const getLiveMatches = async (req, res) => {
                     };
                     // Try to fetch match scorecard from Cricbuzz API
                     const url = `${RAPIDAPI_MATCHES_INFO_URL}/${match.matchId}/scard`;
-                    const scorecardResponse = await axios_1.default.get(url, { headers, timeout: 10000 });
-                    if (scorecardResponse.data) {
+                    const { rapidApiRateLimiter } = await Promise.resolve().then(() => __importStar(require('../../utils/rateLimiter')));
+                    const scorecardResponse = await rapidApiRateLimiter.makeRequest(url, { headers });
+                    if (scorecardResponse) {
                         console.log(`Scorecard fetched for match ${match.matchId}`);
                         // Map status to valid enum value before saving
                         let updatedStatus = match.status;
@@ -537,14 +576,14 @@ const getLiveMatches = async (req, res) => {
                         }
                         // Store scorecard data in database
                         const updateData = {
-                            scorecard: scorecardResponse.data,
+                            scorecard: scorecardResponse,
                             status: updatedStatus,
                             isLive: updatedStatus === 'LIVE'
                         };
                         const updatedMatch = await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, { $set: updateData }, { new: true });
                         if (updatedMatch) {
                             // Extract scores from scorecard
-                            const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(scorecardResponse.data);
+                            const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(scorecardResponse);
                             // Update team scores
                             if (updatedMatch.teams && updatedMatch.teams.length >= 2) {
                                 updatedMatch.teams[0].score = team1Score;
@@ -558,10 +597,12 @@ const getLiveMatches = async (req, res) => {
                                     console.error(`Error saving updated scores for match ${match.matchId}:`, saveError);
                                     // If save fails, try to update just the teams
                                     try {
-                                        await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, { $set: {
+                                        await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, {
+                                            $set: {
                                                 "teams.0.score": team1Score,
                                                 "teams.1.score": team2Score
-                                            } }, { new: true });
+                                            }
+                                        }, { new: true });
                                         console.log(`Updated scores via findOneAndUpdate for match ${match.matchId}: Team1=${team1Score.runs}/${team1Score.wickets}, Team2=${team2Score.runs}/${team2Score.wickets}`);
                                     }
                                     catch (updateError) {
@@ -592,7 +633,7 @@ const getLiveMatches = async (req, res) => {
             return processedMatch;
         }));
         // Filter out matches that have actually ended
-        const actuallyLiveMatches = processedMatches.filter(match => {
+        const actuallyLiveMatches = finalMatches.filter(match => {
             var _a, _b, _c, _d;
             // Check if match has ended more than 48 hours ago
             if (match.endDate && match.endDate < new Date(Date.now() - 48 * 60 * 60 * 1000)) {
@@ -628,7 +669,7 @@ const getLiveMatches = async (req, res) => {
             }
             return true;
         });
-        console.log(`Found ${actuallyLiveMatches.length} actually live matches from database (filtered from ${processedMatches.length})`);
+        console.log(`Found ${actuallyLiveMatches.length} actually live matches from database (filtered from ${finalMatches.length})`);
         return res.json(actuallyLiveMatches);
     }
     catch (error) {
