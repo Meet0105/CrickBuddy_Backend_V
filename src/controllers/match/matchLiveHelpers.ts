@@ -9,7 +9,7 @@ const mapStatusToEnum = (status: string): 'UPCOMING' | 'LIVE' | 'COMPLETED' | 'A
   
   // Map LIVE status patterns
   if (lowerStatus.includes('live') || 
-      lowerStatus.includes('in progress') || 
+      lowerStatus.includes('in progress') ||
       lowerStatus.includes('innings break') ||
       lowerStatus.includes('rain delay') ||
       lowerStatus.includes('tea break') ||

@@ -69,6 +69,11 @@ app.use((err, req, res, next) => {
     res.status(500).json({ message: 'Internal server error', error: err === null || err === void 0 ? void 0 : err.message });
 });
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-    console.log(`🚀 Server listening on port ${PORT}`);
-});
+// For Vercel deployment
+if (process.env.NODE_ENV !== 'production') {
+    app.listen(PORT, () => {
+        console.log(`🚀 Server listening on port ${PORT}`);
+    });
+}
+// Export for Vercel
+exports.default = app;
