@@ -455,6 +455,94 @@ app.get('/api/matches/:id', async (req, res) => {
   }
 });
 
+// Match sync details endpoint
+app.post('/api/matches/:id/sync-details', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`🔄 Syncing details for match ${id}`);
+    
+    // For now, return a simple success response
+    // In a full implementation, this would sync match data from external APIs
+    res.json({ 
+      success: true, 
+      message: 'Match data sync is not available for this match',
+      match: null 
+    });
+  } catch (error) {
+    console.error('Sync details error:', error);
+    res.status(500).json({ error: 'Failed to sync match details' });
+  }
+});
+
+// Match scorecard endpoint
+app.get('/api/matches/:id/scorecard', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`📊 Fetching scorecard for match ${id}`);
+    
+    // For now, return empty scorecard data
+    // In a full implementation, this would fetch detailed scorecard from external APIs
+    res.json({
+      scorecard: [],
+      message: 'Detailed scorecard not available'
+    });
+  } catch (error) {
+    console.error('Scorecard error:', error);
+    res.status(500).json({ error: 'Failed to fetch scorecard' });
+  }
+});
+
+// Match historical scorecard endpoint
+app.get('/api/matches/:id/historical-scorecard', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`📈 Fetching historical scorecard for match ${id}`);
+    
+    // For now, return empty historical scorecard data
+    res.json({
+      historicalScorecard: [],
+      message: 'Historical scorecard not available'
+    });
+  } catch (error) {
+    console.error('Historical scorecard error:', error);
+    res.status(500).json({ error: 'Failed to fetch historical scorecard' });
+  }
+});
+
+// Match commentary endpoint
+app.get('/api/matches/:id/commentary', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`💬 Fetching commentary for match ${id}`);
+    
+    // For now, return empty commentary data
+    res.json({
+      commentary: [],
+      message: 'Commentary not available'
+    });
+  } catch (error) {
+    console.error('Commentary error:', error);
+    res.status(500).json({ error: 'Failed to fetch commentary' });
+  }
+});
+
+// Match overs endpoint
+app.get('/api/matches/:id/overs', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`🏏 Fetching overs for match ${id}`);
+    
+    // For now, return empty overs data
+    res.json({
+      overs: [],
+      message: 'Overs data not available'
+    });
+  } catch (error) {
+    console.error('Overs error:', error);
+    res.status(500).json({ error: 'Failed to fetch overs data' });
+  }
+});
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' });
