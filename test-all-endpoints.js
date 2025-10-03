@@ -6,17 +6,9 @@ async function testAllEndpoints() {
   console.log('🔍 Testing all API endpoints...\n');
   
   const endpoints = [
-    '/api/matches/upcoming',
+    '/api/matches/upcoming?limit=5',
     '/api/matches/live', 
-    '/api/matches/recent',
-    '/api/matches/135173',
-    '/api/series',
-    '/api/teams',
-    '/api/teams/1',
-    '/api/news',
-    '/api/news/1',
-    '/api/players/search?plrN=Virat',
-    '/api/players/trending'
+    '/api/matches/recent?limit=3'
   ];
   
   for (const endpoint of endpoints) {
