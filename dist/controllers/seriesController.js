@@ -1,0 +1,25 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.syncSeriesDetails = exports.syncSeriesFromRapidAPI = exports.getSeriesVenues = exports.getSeriesStats = exports.getSeriesPointsTable = exports.getSeriesSquads = exports.getSeriesSchedule = exports.getSeriesMatches = exports.getSeriesList = exports.getSeriesById = exports.getAllSeries = void 0;
+// Import all the component functions
+const seriesCore_1 = require("./series/seriesCore");
+Object.defineProperty(exports, "getAllSeries", { enumerable: true, get: function () { return seriesCore_1.getAllSeries; } });
+Object.defineProperty(exports, "getSeriesById", { enumerable: true, get: function () { return seriesCore_1.getSeriesById; } });
+const seriesList_1 = require("./series/seriesList");
+Object.defineProperty(exports, "getSeriesList", { enumerable: true, get: function () { return seriesList_1.getSeriesList; } });
+const seriesMatches_1 = require("./series/seriesMatches");
+Object.defineProperty(exports, "getSeriesMatches", { enumerable: true, get: function () { return seriesMatches_1.getSeriesMatches; } });
+const seriesSquads_1 = require("./series/seriesSquads");
+Object.defineProperty(exports, "getSeriesSquads", { enumerable: true, get: function () { return seriesSquads_1.getSeriesSquads; } });
+const seriesStats_1 = require("./series/seriesStats");
+Object.defineProperty(exports, "getSeriesStats", { enumerable: true, get: function () { return seriesStats_1.getSeriesStats; } });
+const seriesVenues_1 = require("./series/seriesVenues");
+Object.defineProperty(exports, "getSeriesVenues", { enumerable: true, get: function () { return seriesVenues_1.getSeriesVenues; } });
+const seriesSync_1 = require("./series/seriesSync");
+Object.defineProperty(exports, "syncSeriesFromRapidAPI", { enumerable: true, get: function () { return seriesSync_1.syncSeriesFromRapidAPI; } });
+const seriesPointsTable_1 = require("./series/seriesPointsTable");
+Object.defineProperty(exports, "getSeriesPointsTable", { enumerable: true, get: function () { return seriesPointsTable_1.getSeriesPointsTable; } });
+const seriesSchedule_1 = require("./series/seriesSchedule");
+Object.defineProperty(exports, "getSeriesSchedule", { enumerable: true, get: function () { return seriesSchedule_1.getSeriesSchedule; } });
+const seriesDetailSync_1 = require("./series/seriesDetailSync");
+Object.defineProperty(exports, "syncSeriesDetails", { enumerable: true, get: function () { return seriesDetailSync_1.syncSeriesDetails; } });

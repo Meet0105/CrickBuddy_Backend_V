@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const teamController_1 = require("../controllers/teamController");
+const router = (0, express_1.Router)();
+router.get('/', teamController_1.getAllTeams);
+router.get('/:id', teamController_1.getTeamById);
+router.get('/:id/schedules', teamController_1.getTeamSchedules);
+router.get('/:id/results', teamController_1.getTeamResults);
+router.get('/:id/news', teamController_1.getTeamNews);
+router.get('/:id/players', teamController_1.getTeamPlayers);
+router.get('/:id/stats-filters', teamController_1.getTeamStatsFilters);
+router.get('/:id/stats', teamController_1.getTeamStats);
+router.get('/:id/test', teamController_1.testTeamAPI);
+router.post('/sync', teamController_1.syncTeamsFromRapidAPI);
+exports.default = router;

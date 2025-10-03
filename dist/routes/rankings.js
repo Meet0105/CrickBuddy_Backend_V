@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const rankingController_1 = require("../controllers/rankingController");
+const recordsController_1 = require("../controllers/records/recordsController");
+const router = (0, express_1.Router)();
+router.get('/', rankingController_1.getRankings);
+router.get('/icc-rankings', rankingController_1.getIccRankings);
+router.get('/icc-standings/:matchType', rankingController_1.getIccStandings);
+router.get('/records-filters', recordsController_1.getRecordsFilters);
+router.get('/records', recordsController_1.getRecords);
+router.post('/sync', rankingController_1.syncRankingsFromRapidAPI);
+exports.default = router;

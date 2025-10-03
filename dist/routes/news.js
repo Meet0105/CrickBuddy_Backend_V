@@ -1,0 +1,18 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const newsController_1 = require("../controllers/newsController");
+const router = (0, express_1.Router)();
+router.get('/', newsController_1.getAllNews);
+router.get('/breaking', newsController_1.getBreakingNews);
+router.get('/featured', newsController_1.getFeaturedNews);
+router.get('/search', newsController_1.searchNews);
+router.get('/category/:category', newsController_1.getNewsByCategory);
+router.get('/categories', newsController_1.getNewsCategories);
+router.get('/category-id/:categoryId', newsController_1.getNewsByCategoryId);
+router.get('/topics', newsController_1.getNewsTopics);
+router.get('/topic/:topicId', newsController_1.getNewsByTopicId);
+router.get('/photo-gallery/:id', newsController_1.getNewsPhotoGallery);
+router.get('/:id', newsController_1.getNewsById);
+router.post('/sync', newsController_1.syncNewsFromRapidAPI);
+exports.default = router;
