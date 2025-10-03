@@ -91,17 +91,33 @@ const processMatchData = (match, status = 'UPCOMING') => {
         const teamScoreKey = `team${teamIndex + 1}Score`;
         const teamScore = match.matchScore[teamScoreKey];
 
-        if (teamScore && teamScore.inngs1) {
-          score = {
-            runs: teamScore.inngs1.runs || 0,
-            wickets: teamScore.inngs1.wickets || 0,
-            overs: teamScore.inngs1.overs || 0,
-            runRate: teamScore.inngs1.runRate || (teamScore.inngs1.runs && teamScore.inngs1.overs ? parseFloat((teamScore.inngs1.runs / teamScore.inngs1.overs).toFixed(2)) : 0)
-          };
+        if (teamScore) {
+          // Try different data structures
+          let scoreData = null;
+          
+          // Structure 1: teamScore.inngs1
+          if (teamScore.inngs1) {
+            scoreData = teamScore.inngs1;
+          }
+          // Structure 2: Direct in teamScore
+          else if (teamScore.runs !== undefined || teamScore.wickets !== undefined) {
+            scoreData = teamScore;
+          }
+          // Structure 3: Check if teamScore itself has the data
+          else if (typeof teamScore === 'object' && teamScore.inningsId) {
+            scoreData = teamScore;
+          }
+
+          if (scoreData) {
+            score = {
+              runs: scoreData.runs || 0,
+              wickets: scoreData.wickets || 0,
+              overs: scoreData.overs || 0,
+              runRate: scoreData.runRate || (scoreData.runs && scoreData.overs ? parseFloat((scoreData.runs / scoreData.overs).toFixed(2)) : 0)
+            };
+          }
         }
       }
-
-      // If no score found, keep as zeros - no sample data
     }
 
     return score;
@@ -467,7 +483,7 @@ app.get('/api/matches/:id/scorecard', async (req, res) => {
     if (process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_MATCHES_INFO_URL) {
       try {
         console.log(`🌐 Fetching scorecard from RapidAPI for match ${id}...`);
-        const scorecardUrl = `${process.env.RAPIDAPI_MATCHES_INFO_URL}/${id}/scorecard`;
+        const scorecardUrl = `${process.env.RAPIDAPI_MATCHES_INFO_URL}/${id}/hscard`;
         
         const response = await axios.get(scorecardUrl, {
           headers: {
@@ -477,9 +493,9 @@ app.get('/api/matches/:id/scorecard', async (req, res) => {
           timeout: 10000
         });
 
-        if (response.data && response.data.scoreCard) {
+        if (response.data && response.data.scorecard) {
           console.log(`✅ Found scorecard data from RapidAPI`);
-          return res.json({ scorecard: response.data.scoreCard });
+          return res.json({ scorecard: response.data.scorecard });
         } else {
           console.log(`❌ No scorecard data found in RapidAPI response`);
         }
