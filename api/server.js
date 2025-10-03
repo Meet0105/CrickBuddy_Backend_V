@@ -84,38 +84,35 @@ const processMatchData = (match, status = 'UPCOMING') => {
   const extractScore = (teamIndex) => {
     let score = { runs: 0, wickets: 0, overs: 0, runRate: 0 };
 
-    // For live and completed matches, try to extract actual scores
-    if (status === 'LIVE' || status === 'COMPLETED') {
-      // Check if matchScore exists in the match data
-      if (match.matchScore) {
-        const teamScoreKey = `team${teamIndex + 1}Score`;
-        const teamScore = match.matchScore[teamScoreKey];
+    // Always try to extract scores if matchScore exists (regardless of status)
+    if (match.matchScore) {
+      const teamScoreKey = `team${teamIndex + 1}Score`;
+      const teamScore = match.matchScore[teamScoreKey];
 
-        if (teamScore) {
-          // Try different data structures
-          let scoreData = null;
-          
-          // Structure 1: teamScore.inngs1
-          if (teamScore.inngs1) {
-            scoreData = teamScore.inngs1;
-          }
-          // Structure 2: Direct in teamScore
-          else if (teamScore.runs !== undefined || teamScore.wickets !== undefined) {
-            scoreData = teamScore;
-          }
-          // Structure 3: Check if teamScore itself has the data
-          else if (typeof teamScore === 'object' && teamScore.inningsId) {
-            scoreData = teamScore;
-          }
+      if (teamScore) {
+        // Try different data structures
+        let scoreData = null;
+        
+        // Structure 1: teamScore.inngs1 (most common)
+        if (teamScore.inngs1) {
+          scoreData = teamScore.inngs1;
+        }
+        // Structure 2: Direct in teamScore
+        else if (teamScore.runs !== undefined || teamScore.wickets !== undefined) {
+          scoreData = teamScore;
+        }
+        // Structure 3: Check if teamScore itself has the data
+        else if (typeof teamScore === 'object' && teamScore.inningsId) {
+          scoreData = teamScore;
+        }
 
-          if (scoreData) {
-            score = {
-              runs: scoreData.runs || 0,
-              wickets: scoreData.wickets || 0,
-              overs: scoreData.overs || 0,
-              runRate: scoreData.runRate || (scoreData.runs && scoreData.overs ? parseFloat((scoreData.runs / scoreData.overs).toFixed(2)) : 0)
-            };
-          }
+        if (scoreData) {
+          score = {
+            runs: scoreData.runs || 0,
+            wickets: scoreData.wickets || 0,
+            overs: scoreData.overs || 0,
+            runRate: scoreData.runRate || (scoreData.runs && scoreData.overs ? parseFloat((scoreData.runs / scoreData.overs).toFixed(2)) : 0)
+          };
         }
       }
     }
