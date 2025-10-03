@@ -85,6 +85,19 @@ app.get('/api/hello', (req, res) => {
   res.json({ message: 'Hello from Vercel API' });
 });
 
+// Debug endpoint to check environment variables
+app.get('/api/debug/env', (req, res) => {
+  res.json({
+    RAPIDAPI_KEY: process.env.RAPIDAPI_KEY ? 'SET ✅' : 'NOT SET ❌',
+    RAPIDAPI_HOST: process.env.RAPIDAPI_HOST ? 'SET ✅' : 'NOT SET ❌',
+    RAPIDAPI_MATCHES_UPCOMING_URL: process.env.RAPIDAPI_MATCHES_UPCOMING_URL ? 'SET ✅' : 'NOT SET ❌',
+    RAPIDAPI_MATCHES_LIVE_URL: process.env.RAPIDAPI_MATCHES_LIVE_URL ? 'SET ✅' : 'NOT SET ❌',
+    RAPIDAPI_MATCHES_RECENT_URL: process.env.RAPIDAPI_MATCHES_RECENT_URL ? 'SET ✅' : 'NOT SET ❌',
+    MONGO_URI: process.env.MONGO_URI ? 'SET ✅' : 'NOT SET ❌',
+    NODE_ENV: process.env.NODE_ENV || 'not set'
+  });
+});
+
 // Live matches endpoint
 app.get('/api/matches/live', async (req, res) => {
   try {
@@ -289,9 +302,15 @@ app.get('/api/matches/upcoming', async (req, res) => {
     const { limit = 10 } = req.query;
 
     // First try to fetch from RapidAPI
+    console.log('🔍 Environment check:', {
+      hasKey: !!process.env.RAPIDAPI_KEY,
+      hasUrl: !!process.env.RAPIDAPI_MATCHES_UPCOMING_URL,
+      hasHost: !!process.env.RAPIDAPI_HOST
+    });
+
     if (process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_MATCHES_UPCOMING_URL) {
       try {
-        console.log('Fetching upcoming matches from RapidAPI...');
+        console.log('✅ Fetching upcoming matches from RapidAPI...');
         const response = await axios.get(process.env.RAPIDAPI_MATCHES_UPCOMING_URL, {
           headers: {
             'x-rapidapi-key': process.env.RAPIDAPI_KEY,
@@ -348,46 +367,48 @@ app.get('/api/matches/upcoming', async (req, res) => {
                 }
               }
 
+              console.log(`🎯 Processed ${processedMatches.length} upcoming matches from RapidAPI`);
               // Return the fresh API data (limited)
               return res.json(processedMatches.slice(0, Number(limit)));
+            } else {
+              console.log('❌ No typeMatches found in RapidAPI response');
             }
+          } catch (apiError) {
+            console.error('RapidAPI upcoming matches error:', apiError.message);
           }
-        } catch (apiError) {
-          console.error('RapidAPI upcoming matches error:', apiError.message);
         }
+
+        // Fallback to database if API fails
+        console.log('Falling back to database for upcoming matches');
+        const upcomingMatches = await Match.find({
+          $and: [
+            {
+              $or: [
+                { status: 'UPCOMING' },
+                { status: 'Upcoming' },
+                { status: { $regex: 'upcoming', $options: 'i' } },
+                { status: { $regex: 'scheduled', $options: 'i' } },
+                {
+                  startDate: { $gte: new Date() },
+                  status: { $nin: ['COMPLETED', 'Complete', 'complete', 'Finished', 'finished', 'LIVE', 'Live', 'live'] }
+                }
+              ]
+            },
+            {
+              status: { $nin: ['LIVE', 'Live', 'live', 'COMPLETED', 'Complete', 'complete', 'Finished', 'finished'] }
+            }
+          ]
+        })
+          .sort({ startDate: 1 })
+          .limit(Number(limit))
+          .select('matchId title shortTitle teams venue series startDate format status');
+
+        res.json(upcomingMatches);
+      } catch (error) {
+        console.error('Upcoming matches error:', error);
+        res.status(500).json({ error: 'Failed to fetch upcoming matches' });
       }
-
-    // Fallback to database if API fails
-    console.log('Falling back to database for upcoming matches');
-      const upcomingMatches = await Match.find({
-        $and: [
-          {
-            $or: [
-              { status: 'UPCOMING' },
-              { status: 'Upcoming' },
-              { status: { $regex: 'upcoming', $options: 'i' } },
-              { status: { $regex: 'scheduled', $options: 'i' } },
-              {
-                startDate: { $gte: new Date() },
-                status: { $nin: ['COMPLETED', 'Complete', 'complete', 'Finished', 'finished', 'LIVE', 'Live', 'live'] }
-              }
-            ]
-          },
-          {
-            status: { $nin: ['LIVE', 'Live', 'live', 'COMPLETED', 'Complete', 'complete', 'Finished', 'finished'] }
-          }
-        ]
-      })
-        .sort({ startDate: 1 })
-        .limit(Number(limit))
-        .select('matchId title shortTitle teams venue series startDate format status');
-
-      res.json(upcomingMatches);
-    } catch (error) {
-      console.error('Upcoming matches error:', error);
-      res.status(500).json({ error: 'Failed to fetch upcoming matches' });
-    }
-  });
+    });
 
 // Match by ID endpoint
 app.get('/api/matches/:id', async (req, res) => {
