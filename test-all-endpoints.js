@@ -12,6 +12,7 @@ async function testAllEndpoints() {
     '/api/matches/135173',
     '/api/series',
     '/api/teams',
+    '/api/teams/1',
     '/api/news',
     '/api/news/1',
     '/api/players/search?plrN=Virat',

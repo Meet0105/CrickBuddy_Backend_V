@@ -353,12 +353,67 @@ app.get('/api/matches/:id', async (req, res) => {
     await connectDB();
 
     const { id } = req.params;
-    const match = await Match.findOne({
+
+    // First try to find in database
+    let match = await Match.findOne({
       $or: [
         { matchId: id },
         { _id: id }
       ]
     });
+
+    // If not found in database, try to fetch from RapidAPI
+    if (!match && process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_MATCHES_INFO_URL) {
+      try {
+        console.log(`Fetching match ${id} from RapidAPI...`);
+        const matchInfoUrl = `${process.env.RAPIDAPI_MATCHES_INFO_URL}/${id}`;
+        const response = await axios.get(matchInfoUrl, {
+          headers: {
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+            'x-rapidapi-host': process.env.RAPIDAPI_HOST
+          },
+          timeout: 10000
+        });
+
+        if (response.data && response.data.matchHeader) {
+          const matchData = response.data.matchHeader;
+          match = {
+            matchId: id,
+            title: matchData.matchDescription || `${matchData.team1?.teamName} vs ${matchData.team2?.teamName}`,
+            shortTitle: matchData.shortDescription || matchData.matchDescription,
+            format: matchData.matchFormat || 'Unknown',
+            status: matchData.status || 'UPCOMING',
+            teams: [
+              {
+                teamId: matchData.team1?.teamId?.toString(),
+                teamName: matchData.team1?.teamName,
+                teamShortName: matchData.team1?.teamSName,
+                score: { runs: 0, wickets: 0, overs: 0, runRate: 0 }
+              },
+              {
+                teamId: matchData.team2?.teamId?.toString(),
+                teamName: matchData.team2?.teamName,
+                teamShortName: matchData.team2?.teamSName,
+                score: { runs: 0, wickets: 0, overs: 0, runRate: 0 }
+              }
+            ],
+            venue: {
+              name: matchData.venueInfo?.ground || 'TBD',
+              city: matchData.venueInfo?.city || '',
+              country: matchData.venueInfo?.country || ''
+            },
+            series: {
+              id: matchData.seriesId?.toString(),
+              name: matchData.seriesName || 'Unknown Series',
+              seriesType: 'INTERNATIONAL'
+            },
+            startDate: matchData.startDate ? new Date(parseInt(matchData.startDate)) : new Date()
+          };
+        }
+      } catch (apiError) {
+        console.error('RapidAPI match info error:', apiError.message);
+      }
+    }
 
     if (!match) {
       return res.status(404).json({ message: 'Match not found' });
@@ -417,25 +472,53 @@ app.get('/api/series', async (req, res) => {
           if (response.data.seriesMapProto) {
             for (const seriesProto of response.data.seriesMapProto) {
               if (seriesProto.series) {
-                seriesList.push(...seriesProto.series.map(series => ({
-                  id: series.id?.toString(),
-                  name: series.name,
-                  seriesType: series.seriesType || 'INTERNATIONAL',
-                  startDate: series.startDt ? new Date(parseInt(series.startDt)) : null,
-                  endDate: series.endDt ? new Date(parseInt(series.endDt)) : null,
-                  status: series.status || 'UPCOMING'
-                })));
+                seriesList.push(...seriesProto.series.map(series => {
+                  // Determine proper status based on dates
+                  let status = 'UPCOMING';
+                  const now = new Date();
+                  const startDate = series.startDt ? new Date(parseInt(series.startDt)) : null;
+                  const endDate = series.endDt ? new Date(parseInt(series.endDt)) : null;
+
+                  if (endDate && endDate < now) {
+                    status = 'COMPLETED';
+                  } else if (startDate && startDate <= now && (!endDate || endDate >= now)) {
+                    status = 'LIVE';
+                  }
+
+                  return {
+                    id: series.id?.toString(),
+                    name: series.name,
+                    seriesType: series.seriesType || 'INTERNATIONAL',
+                    startDate: startDate,
+                    endDate: endDate,
+                    status: status
+                  };
+                }));
               }
             }
           } else if (response.data.series) {
-            seriesList = response.data.series.map(series => ({
-              id: series.id?.toString(),
-              name: series.name,
-              seriesType: series.seriesType || 'INTERNATIONAL',
-              startDate: series.startDt ? new Date(parseInt(series.startDt)) : null,
-              endDate: series.endDt ? new Date(parseInt(series.endDt)) : null,
-              status: series.status || 'UPCOMING'
-            }));
+            seriesList = response.data.series.map(series => {
+              // Determine proper status based on dates
+              let status = 'UPCOMING';
+              const now = new Date();
+              const startDate = series.startDt ? new Date(parseInt(series.startDt)) : null;
+              const endDate = series.endDt ? new Date(parseInt(series.endDt)) : null;
+
+              if (endDate && endDate < now) {
+                status = 'COMPLETED';
+              } else if (startDate && startDate <= now && (!endDate || endDate >= now)) {
+                status = 'LIVE';
+              }
+
+              return {
+                id: series.id?.toString(),
+                name: series.name,
+                seriesType: series.seriesType || 'INTERNATIONAL',
+                startDate: startDate,
+                endDate: endDate,
+                status: status
+              };
+            });
           }
 
           return res.json(seriesList);
@@ -501,7 +584,10 @@ app.get('/api/teams', async (req, res) => {
             teamName: team.teamName,
             teamSName: team.teamSName,
             teamType: team.teamType || 'INTERNATIONAL',
-            imageId: team.imageId
+            imageId: team.imageId,
+            flagImage: team.imageId ? {
+              url: `/api/photos/image/${team.imageId}`
+            } : null
           }));
 
           return res.json(teamsList);
@@ -532,6 +618,63 @@ app.get('/api/teams', async (req, res) => {
   }
 });
 
+// Team by ID endpoint
+app.get('/api/teams/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Try to fetch team details from RapidAPI
+    if (process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_TEAMS_LIST_URL) {
+      try {
+        console.log(`Fetching team ${id} details from RapidAPI...`);
+        const response = await axios.get(process.env.RAPIDAPI_TEAMS_LIST_URL, {
+          headers: {
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+            'x-rapidapi-host': process.env.RAPIDAPI_HOST
+          },
+          timeout: 10000
+        });
+
+        if (response.data && response.data.list) {
+          const team = response.data.list.find(t => t.teamId?.toString() === id);
+          if (team) {
+            const teamDetails = {
+              teamId: team.teamId?.toString(),
+              teamName: team.teamName,
+              teamSName: team.teamSName,
+              teamType: team.teamType || 'INTERNATIONAL',
+              imageId: team.imageId,
+              flagImage: team.imageId ? {
+                url: `/api/photos/image/${team.imageId}`
+              } : null
+            };
+            return res.json(teamDetails);
+          }
+        }
+      } catch (apiError) {
+        console.error('RapidAPI team details error:', apiError.message);
+      }
+    }
+
+    // Fallback team data
+    const fallbackTeams = {
+      '1': { teamId: '1', teamName: 'India', teamSName: 'IND', teamType: 'INTERNATIONAL' },
+      '2': { teamId: '2', teamName: 'Australia', teamSName: 'AUS', teamType: 'INTERNATIONAL' },
+      '3': { teamId: '3', teamName: 'England', teamSName: 'ENG', teamType: 'INTERNATIONAL' }
+    };
+
+    const team = fallbackTeams[id];
+    if (!team) {
+      return res.status(404).json({ message: 'Team not found' });
+    }
+
+    res.json(team);
+  } catch (error) {
+    console.error('Team details error:', error);
+    res.status(500).json({ error: 'Failed to fetch team details' });
+  }
+});
+
 // News endpoints
 app.get('/api/news', async (req, res) => {
   try {
@@ -550,14 +693,18 @@ app.get('/api/news', async (req, res) => {
         });
 
         if (response.data && response.data.storyList) {
-          const newsList = response.data.storyList.slice(0, Number(limit)).map(story => ({
-            id: story.story?.id?.toString() || story.id?.toString(),
-            headline: story.story?.hline || story.hline || 'Cricket News',
-            intro: story.story?.intro || story.intro || '',
-            publishTime: story.story?.pubTime ? new Date(parseInt(story.story.pubTime)).toISOString() : new Date().toISOString(),
-            source: story.story?.source || 'Cricbuzz',
-            imageId: story.story?.imageId || story.imageId
-          }));
+          const newsList = response.data.storyList.slice(0, Number(limit)).map(story => {
+            const storyData = story.story || story;
+            return {
+              id: storyData.id?.toString(),
+              headline: storyData.hline || 'Cricket News',
+              intro: storyData.intro || '',
+              publishTime: storyData.pubTime ? new Date(parseInt(storyData.pubTime)).toISOString() : new Date().toISOString(),
+              source: storyData.source || 'Cricbuzz',
+              imageId: storyData.imageId,
+              content: storyData.content || storyData.intro || 'Full article content...'
+            };
+          });
 
           return res.json(newsList);
         }
@@ -589,11 +736,44 @@ app.get('/api/news/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Try to fetch news detail from RapidAPI
+    if (process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_NEWS_DETAIL_URL) {
+      try {
+        console.log(`Fetching news ${id} from RapidAPI...`);
+        const newsDetailUrl = `${process.env.RAPIDAPI_NEWS_DETAIL_URL}/${id}`;
+        const response = await axios.get(newsDetailUrl, {
+          headers: {
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+            'x-rapidapi-host': process.env.RAPIDAPI_HOST
+          },
+          timeout: 10000
+        });
+
+        if (response.data) {
+          const newsData = response.data;
+          const newsItem = {
+            id: id,
+            headline: newsData.headline || newsData.hline || 'Cricket News',
+            intro: newsData.intro || '',
+            content: newsData.content || newsData.intro || 'Full article content...',
+            publishTime: newsData.pubTime ? new Date(parseInt(newsData.pubTime)).toISOString() : new Date().toISOString(),
+            source: newsData.source || 'Cricbuzz',
+            imageId: newsData.imageId
+          };
+
+          return res.json(newsItem);
+        }
+      } catch (apiError) {
+        console.error('RapidAPI news detail error:', apiError.message);
+      }
+    }
+
+    // Fallback news item
     const newsItem = {
       id,
       headline: 'Cricket Match Preview',
       intro: 'Detailed analysis of the upcoming cricket match...',
-      content: 'Full article content would go here...',
+      content: 'Full article content would go here. This is a detailed cricket news article with comprehensive coverage of the match, players, and analysis.',
       publishTime: new Date().toISOString(),
       source: 'Cricket News',
       imageId: 'news1'
@@ -734,6 +914,38 @@ app.get('/api/rankings/*', async (req, res) => {
 });
 
 // Photos endpoints
+app.get('/api/photos/image/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Try to fetch image from RapidAPI
+    if (process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_IMAGE_URL) {
+      try {
+        const imageUrl = `${process.env.RAPIDAPI_IMAGE_URL}/${id}`;
+        const response = await axios.get(imageUrl, {
+          headers: {
+            'x-rapidapi-key': process.env.RAPIDAPI_KEY,
+            'x-rapidapi-host': process.env.RAPIDAPI_HOST
+          },
+          timeout: 10000,
+          responseType: 'stream'
+        });
+
+        // Forward the image
+        response.data.pipe(res);
+        return;
+      } catch (apiError) {
+        console.error('RapidAPI image error:', apiError.message);
+      }
+    }
+
+    // Fallback: return placeholder image URL or 404
+    res.status(404).json({ error: 'Image not found' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch image' });
+  }
+});
+
 app.get('/api/photos/*', async (req, res) => {
   try {
     res.json([]);
