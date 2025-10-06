@@ -156,31 +156,33 @@ const getUpcomingMatches = async (req, res) => {
                             return Match_1.default.findOneAndUpdate({ matchId: doc.matchId }, { $set: doc }, { upsert: true, new: true, setDefaultsOnInsert: true });
                         });
                         await Promise.all(upsertPromises);
-                        // Return from database after saving
+                        // Return from database after saving - only UPCOMING matches
                         const upcomingMatches = await Match_1.default.find({
-                            $and: [
-                                {
-                                    $or: [
-                                        { status: 'UPCOMING' },
-                                        { status: { $regex: 'upcoming', $options: 'i' } },
-                                        { status: { $regex: 'Upcoming', $options: 'i' } },
-                                        { status: { $regex: 'Scheduled', $options: 'i' } },
-                                        { status: { $regex: 'scheduled', $options: 'i' } },
-                                        {
-                                            startDate: { $gte: new Date() },
-                                            status: { $nin: ['COMPLETED', 'Complete', 'complete', 'Finished', 'finished'] }
-                                        }
-                                    ]
-                                },
-                                {
-                                    status: { $nin: ['LIVE', 'Live', 'live', 'COMPLETED', 'Complete', 'complete', 'Finished', 'finished'] }
-                                }
-                            ]
+                            status: 'UPCOMING',
+                            startDate: { $gte: new Date() } // Only future matches
                         })
                             .sort({ startDate: 1 })
-                            .limit(Number(limit))
-                            .select('matchId title shortTitle teams venue series startDate format status');
-                        return res.json(upcomingMatches);
+                            .limit(Number(limit) * 2) // Get more to filter
+                            .select('matchId title shortTitle teams venue series startDate format status raw');
+                        // Filter out any matches that aren't actually upcoming
+                        const validUpcomingMatches = upcomingMatches.filter(match => {
+                            // Double-check the status
+                            if (match.status !== 'UPCOMING')
+                                return false;
+                            // Check raw data if available
+                            if (match.raw) {
+                                const rawState = (match.raw.state || '').toLowerCase();
+                                const rawStatus = (match.raw.status || '').toLowerCase();
+                                // Skip if raw data indicates it's completed or live
+                                if (rawState.includes('complete') || rawState.includes('live') ||
+                                    rawStatus.includes('complete') || rawStatus.includes('live') ||
+                                    rawState.includes('finished') || rawStatus.includes('won')) {
+                                    return false;
+                                }
+                            }
+                            return true;
+                        }).slice(0, Number(limit)); // Limit after filtering
+                        return res.json(validUpcomingMatches);
                     }
                 }
             }
@@ -189,31 +191,14 @@ const getUpcomingMatches = async (req, res) => {
                 // Continue to fallback logic
             }
         }
-        // Fallback to database if API config is missing or API call failed
+        // Fallback to database if API config is missing or API call failed - only UPCOMING matches
         console.log('Falling back to database for upcoming matches');
         const dbMatches = await Match_1.default.find({
-            $and: [
-                {
-                    $or: [
-                        { status: 'UPCOMING' },
-                        { status: 'Upcoming' },
-                        { status: { $regex: 'upcoming', $options: 'i' } },
-                        { status: { $regex: 'Upcoming', $options: 'i' } },
-                        { status: { $regex: 'Scheduled', $options: 'i' } },
-                        { status: { $regex: 'scheduled', $options: 'i' } },
-                        {
-                            startDate: { $gte: new Date() },
-                            status: { $nin: ['COMPLETED', 'Complete', 'complete', 'Finished', 'finished', 'LIVE', 'Live', 'live'] }
-                        }
-                    ]
-                },
-                {
-                    status: { $nin: ['LIVE', 'Live', 'live', 'COMPLETED', 'Complete', 'complete', 'Finished', 'finished'] }
-                }
-            ]
+            status: 'UPCOMING',
+            startDate: { $gte: new Date() } // Only future matches
         })
             .sort({ startDate: 1 })
-            .limit(Number(limit))
+            .limit(Number(limit) * 2) // Get more to filter
             .select('matchId title shortTitle teams venue series startDate format status raw');
         // Process matches to extract data from raw field if needed
         const processedMatches = dbMatches.map(match => {
@@ -223,7 +208,27 @@ const getUpcomingMatches = async (req, res) => {
             }
             return match;
         });
-        return res.json(processedMatches);
+        // Filter out any non-upcoming matches
+        const validMatches = processedMatches.filter(match => {
+            if (match.status !== 'UPCOMING') {
+                console.log(`Filtering out match ${match.matchId} - status is ${match.status}, not UPCOMING`);
+                return false;
+            }
+            // Check raw data if available
+            if (match.raw) {
+                const rawState = (match.raw.state || '').toLowerCase();
+                const rawStatus = (match.raw.status || '').toLowerCase();
+                if (rawState.includes('complete') || rawState.includes('live') ||
+                    rawStatus.includes('complete') || rawStatus.includes('live') ||
+                    rawState.includes('finished') || rawStatus.includes('won')) {
+                    console.log(`Filtering out match ${match.matchId} - raw data indicates not upcoming`);
+                    return false;
+                }
+            }
+            return true;
+        }).slice(0, Number(limit)); // Limit after filtering
+        console.log(`Returning ${validMatches.length} valid upcoming matches (filtered from ${processedMatches.length})`);
+        return res.json(validMatches);
     }
     catch (error) {
         console.error('getUpcomingMatches error:', error);
@@ -233,24 +238,8 @@ const getUpcomingMatches = async (req, res) => {
             try {
                 const { limit = 10 } = req.query;
                 const upcomingMatches = await Match_1.default.find({
-                    $and: [
-                        {
-                            $or: [
-                                { status: 'UPCOMING' },
-                                { status: { $regex: 'upcoming', $options: 'i' } },
-                                { status: { $regex: 'Upcoming', $options: 'i' } },
-                                { status: { $regex: 'Scheduled', $options: 'i' } },
-                                { status: { $regex: 'scheduled', $options: 'i' } },
-                                {
-                                    startDate: { $gte: new Date() },
-                                    status: { $nin: ['COMPLETED', 'Complete', 'complete', 'Finished', 'finished'] }
-                                }
-                            ]
-                        },
-                        {
-                            status: { $nin: ['LIVE', 'Live', 'live', 'COMPLETED', 'Complete', 'complete', 'Finished', 'finished'] }
-                        }
-                    ]
+                    status: 'UPCOMING',
+                    startDate: { $gte: new Date() }
                 })
                     .sort({ startDate: 1 })
                     .limit(Number(limit))
@@ -265,24 +254,8 @@ const getUpcomingMatches = async (req, res) => {
         try {
             const { limit = 10 } = req.query;
             const upcomingMatches = await Match_1.default.find({
-                $and: [
-                    {
-                        $or: [
-                            { status: 'UPCOMING' },
-                            { status: { $regex: 'upcoming', $options: 'i' } },
-                            { status: { $regex: 'Upcoming', $options: 'i' } },
-                            { status: { $regex: 'Scheduled', $options: 'i' } },
-                            { status: { $regex: 'scheduled', $options: 'i' } },
-                            {
-                                startDate: { $gte: new Date() },
-                                status: { $nin: ['COMPLETED', 'Complete', 'complete', 'Finished', 'finished'] }
-                            }
-                        ]
-                    },
-                    {
-                        status: { $nin: ['LIVE', 'Live', 'live', 'COMPLETED', 'Complete', 'complete', 'Finished', 'finished'] }
-                    }
-                ]
+                status: 'UPCOMING',
+                startDate: { $gte: new Date() }
             })
                 .sort({ startDate: 1 })
                 .limit(Number(limit))

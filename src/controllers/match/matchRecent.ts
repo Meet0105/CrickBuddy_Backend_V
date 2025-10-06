@@ -6,19 +6,19 @@ import { processRawMatchData } from './matchRecentHelpers';
 // Helper function to map API status to our enum values
 const mapStatusToEnum = (status: string): 'UPCOMING' | 'LIVE' | 'COMPLETED' | 'ABANDONED' | 'CANCELLED' => {
   if (!status) return 'UPCOMING';
-  
+
   // Convert to lowercase for case-insensitive comparison
   const lowerStatus = status.toLowerCase();
-  
+
   // Map common status values
   if (lowerStatus.includes('live') || lowerStatus.includes('in progress')) return 'LIVE';
   if (lowerStatus.includes('complete') || lowerStatus.includes('finished')) return 'COMPLETED';
   if (lowerStatus.includes('abandon')) return 'ABANDONED';
   if (lowerStatus.includes('cancel')) return 'CANCELLED';
-  
+
   // For upcoming matches with date information
   if (lowerStatus.includes('match starts')) return 'UPCOMING';
-  
+
   // Default fallback
   return 'UPCOMING';
 };
@@ -57,13 +57,13 @@ export const getRecentMatches = async (req: Request, res: Response) => {
 
         // Process API response and save to database
         if (response.data && response.data.typeMatches) {
-          const recentMatchesData = response.data.typeMatches.find((type: any) => 
+          const recentMatchesData = response.data.typeMatches.find((type: any) =>
             type.matchType === 'Recent Matches'
           );
 
           if (recentMatchesData && recentMatchesData.seriesMatches) {
             const matchesList: any[] = [];
-            
+
             // Extract matches from series
             for (const seriesMatch of recentMatchesData.seriesMatches) {
               if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
@@ -74,15 +74,15 @@ export const getRecentMatches = async (req: Request, res: Response) => {
             // Process and save each match
             const upsertPromises = matchesList.map(async (m) => {
               const matchId = m.matchInfo?.matchId || m.id || m.matchId || JSON.stringify(m).slice(0, 40);
-              
+
               // Extract series information
               const seriesId = m.matchInfo?.seriesId || '0';
               const seriesName = m.matchInfo?.seriesName || 'Unknown Series';
-              
+
               // Extract team information
               const team1Info = m.matchInfo?.team1 || m.teamA || m.team1 || {};
               const team2Info = m.matchInfo?.team2 || m.teamB || m.team2 || {};
-              
+
               const team1Name = team1Info.teamName || team1Info.teamSName || team1Info.name || 'Team 1';
               const team2Name = team2Info.teamName || team2Info.teamSName || team2Info.name || 'Team 2';
               const team1Id = team1Info.teamId || team1Info.id || '1';
@@ -93,7 +93,7 @@ export const getRecentMatches = async (req: Request, res: Response) => {
               const title = m.matchInfo?.matchDesc || m.title || m.name || `${team1Name} vs ${team2Name}`;
               const rawStatus = m.matchInfo?.status || m.matchInfo?.state || m.status || m.matchStatus || 'COMPLETED';
               const mappedStatus = mapStatusToEnum(rawStatus);
-              
+
               // Check if match should be live based on time
               const matchStartTime = m.matchInfo?.startDate ? new Date(parseInt(m.matchInfo.startDate)) : null;
               const currentTime = new Date();
@@ -115,17 +115,17 @@ export const getRecentMatches = async (req: Request, res: Response) => {
               if (m.matchInfo?.startDate) startDate = new Date(parseInt(m.matchInfo.startDate));
               else if (m.startDate) startDate = new Date(m.startDate);
               else if (m.date) startDate = new Date(m.date);
-              
+
               if (m.matchInfo?.endDate) endDate = new Date(parseInt(m.matchInfo.endDate));
               else if (m.endDate) endDate = new Date(m.endDate);
 
               // Extract result information
               const resultText = m.matchInfo?.status || m.status || '';
               const winnerTeam = m.matchInfo?.winner || m.winner || '';
-              
+
               // Extract score information
               const innings = m.matchScore?.scoreData || m.innings || [];
-              
+
               // Create teams array in the expected format
               const teams = [
                 {
@@ -193,33 +193,33 @@ export const getRecentMatches = async (req: Request, res: Response) => {
             await Promise.all(upsertPromises);
 
             // Return from database after saving - only COMPLETED matches
-            const recentMatches = await Match.find({ 
+            const recentMatches = await Match.find({
               status: 'COMPLETED'
             })
-            .sort({ endDate: -1, updatedAt: -1 })
-            .limit(Number(limit))
-            .select('matchId title shortTitle teams venue series endDate result format status');
-            
+              .sort({ endDate: -1, updatedAt: -1 })
+              .limit(Number(limit))
+              .select('matchId title shortTitle teams venue series endDate result format status');
+
             // Filter out any matches that aren't actually completed
             const validRecentMatches = recentMatches.filter(match => {
               // Double-check the status
               if (match.status !== 'COMPLETED') return false;
-              
+
               // Check raw data if available
               if (match.raw) {
                 const rawState = (match.raw.state || '').toLowerCase();
                 const rawStatus = (match.raw.status || '').toLowerCase();
-                
+
                 // Skip if raw data indicates it's not completed
-                if (rawState.includes('upcoming') || rawState.includes('preview') || 
-                    rawStatus.includes('upcoming') || rawStatus.includes('preview')) {
+                if (rawState.includes('upcoming') || rawState.includes('preview') ||
+                  rawStatus.includes('upcoming') || rawStatus.includes('preview')) {
                   return false;
                 }
               }
-              
+
               return true;
             });
-            
+
             return res.json(validRecentMatches);
           }
         }
@@ -231,12 +231,12 @@ export const getRecentMatches = async (req: Request, res: Response) => {
 
     // Fallback to database if API config is missing or API call failed - only COMPLETED matches
     console.log('Falling back to database for recent matches');
-    const dbMatches = await Match.find({ 
+    const dbMatches = await Match.find({
       status: 'COMPLETED'
     })
-    .sort({ endDate: -1, updatedAt: -1 })
-    .limit(Number(limit) * 2) // Get more to filter
-    .select('matchId title shortTitle teams venue series endDate result format status raw');
+      .sort({ endDate: -1, updatedAt: -1 })
+      .limit(Number(limit) * 2) // Get more to filter
+      .select('matchId title shortTitle teams venue series endDate result format status raw');
 
     console.log(`Found ${dbMatches.length} matches in database`);
 
@@ -249,7 +249,7 @@ export const getRecentMatches = async (req: Request, res: Response) => {
         hasRaw: !!match.raw,
         teamsNeedProcessing: !match.teams || match.teams.some(team => !team.score || (team.score.runs === 0 && team.score.wickets === 0 && team.score.overs === 0))
       });
-      
+
       // Always process if we have raw data, regardless of existing data
       // This ensures we extract scores from raw data even when teams exist but have zero scores
       if (match.raw) {
@@ -265,55 +265,55 @@ export const getRecentMatches = async (req: Request, res: Response) => {
         console.log(`Filtering out match ${match.matchId} - status is ${match.status}, not COMPLETED`);
         return false;
       }
-      
+
       // Check raw data if available
       if (match.raw) {
         const rawState = (match.raw.state || '').toLowerCase();
         const rawStatus = (match.raw.status || '').toLowerCase();
-        
-        if (rawState.includes('upcoming') || rawState.includes('preview') || 
-            rawStatus.includes('upcoming') || rawStatus.includes('preview')) {
+
+        if (rawState.includes('upcoming') || rawState.includes('preview') ||
+          rawStatus.includes('upcoming') || rawStatus.includes('preview')) {
           console.log(`Filtering out match ${match.matchId} - raw data indicates not completed`);
           return false;
         }
       }
-      
+
       return true;
     }).slice(0, Number(limit)); // Limit after filtering
-    
+
     console.log(`Returning ${validMatches.length} valid completed matches (filtered from ${processedMatches.length})`);
     return res.json(validMatches);
   } catch (error) {
     console.error('getRecentMatches error:', error);
-    
+
     // Handle rate limiting
     if ((error as any)?.response?.status === 429) {
       // Fallback to database if API rate limit exceeded
       try {
         const { limit = 10 } = req.query;
-        const recentMatches = await Match.find({ 
+        const recentMatches = await Match.find({
           status: 'COMPLETED'
         })
-        .sort({ endDate: -1, updatedAt: -1 })
-        .limit(Number(limit))
-        .select('matchId title shortTitle teams venue series endDate result format status');
-        
+          .sort({ endDate: -1, updatedAt: -1 })
+          .limit(Number(limit))
+          .select('matchId title shortTitle teams venue series endDate result format status');
+
         return res.json(recentMatches);
       } catch (dbError) {
         return res.status(500).json({ message: 'Server error', error: (dbError as Error).message });
       }
     }
-    
+
     // Fallback to database if API fails
     try {
       const { limit = 10 } = req.query;
-      const recentMatches = await Match.find({ 
+      const recentMatches = await Match.find({
         status: 'COMPLETED'
       })
-      .sort({ endDate: -1, updatedAt: -1 })
-      .limit(Number(limit))
-      .select('matchId title shortTitle teams venue series endDate result format status');
-      
+        .sort({ endDate: -1, updatedAt: -1 })
+        .limit(Number(limit))
+        .select('matchId title shortTitle teams venue series endDate result format status');
+
       res.json(recentMatches);
     } catch (dbError) {
       res.status(500).json({ message: 'Server error', error: (dbError as Error).message });
