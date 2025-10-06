@@ -183,10 +183,23 @@ export const getLiveMatches = async (req: Request, res: Response) => {
               const format = m.matchInfo?.matchFormat || m.matchInfo?.matchType || m.format || m.type || m.matchType || 'Other';
               const title = m.matchInfo?.matchDesc || m.title || m.name || `${team1Name} vs ${team2Name}`;
               const rawStatus = m.matchInfo?.status || m.matchInfo?.state || m.status || m.matchStatus || 'LIVE';
+              const rawState = m.matchInfo?.state || m.state || '';
               const shortStatus = m.matchInfo?.shortStatus || m.shortStatus || '';
               
-              // Check short status for completion indicators
+              // Check raw state first - it's more reliable than status
               let status = mapStatusToEnum(rawStatus); // Use the mapping function
+              
+              // Override based on raw state if it's more specific
+              if (rawState) {
+                const lowerState = rawState.toLowerCase();
+                if (lowerState === 'preview' || lowerState === 'upcoming' || lowerState.includes('match starts')) {
+                  status = 'UPCOMING';
+                  console.log(`⚠️ Match ${matchId}: rawState="${rawState}" indicates UPCOMING, overriding status`);
+                } else if (lowerState === 'complete' || lowerState.includes('complete')) {
+                  status = 'COMPLETED';
+                  console.log(`⚠️ Match ${matchId}: rawState="${rawState}" indicates COMPLETED`);
+                }
+              }
               
               // Override status if shortStatus indicates completion
               if (shortStatus && (
@@ -196,21 +209,20 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                 shortStatus.toLowerCase().includes('match tied') ||
                 shortStatus.toLowerCase().includes('no result')
               )) {
-                console.log(`⚠️ Match ${matchId}: rawStatus="${rawStatus}" but shortStatus="${shortStatus}" indicates COMPLETED`);
+                console.log(`⚠️ Match ${matchId}: shortStatus="${shortStatus}" indicates COMPLETED`);
                 status = 'COMPLETED';
               }
 
-              // Check if match should be live based on time (only if not already completed)
-              if (status !== 'COMPLETED') {
+              // Check if match should be live based on time (only if not already completed or upcoming)
+              if (status !== 'COMPLETED' && status !== 'UPCOMING') {
                 const matchStartTime = m.matchInfo?.startDate ? new Date(parseInt(m.matchInfo.startDate)) : null;
                 const currentTime = new Date();
                 const shouldBeLive = matchStartTime &&
                   matchStartTime <= currentTime &&
-                  (currentTime.getTime() - matchStartTime.getTime()) < (8 * 60 * 60 * 1000) && // Started within 8 hours
-                  status === 'UPCOMING'; // Only override if currently upcoming
+                  (currentTime.getTime() - matchStartTime.getTime()) < (8 * 60 * 60 * 1000); // Started within 8 hours
 
                 if (shouldBeLive) {
-                  console.log(`⚡ Overriding status for match ${matchId}: "${rawStatus}" -> "LIVE" (based on start time)`);
+                  console.log(`⚡ Match ${matchId}: Started recently, marking as LIVE`);
                   status = 'LIVE';
                 }
               }
@@ -282,10 +294,15 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                 return null; // Skip this match
               }
               
-              // Skip completed matches from being saved as live
+              // Skip completed and upcoming matches from being saved as live
               if (status === 'COMPLETED') {
                 console.log(`⚠️ Skipping completed match: ID=${matchId}, Status=${status}`);
                 return null; // Skip this match
+              }
+              
+              if (status === 'UPCOMING') {
+                console.log(`⚠️ Skipping upcoming match from live endpoint: ID=${matchId}, Status=${status}`);
+                return null; // Skip this match - it should be in upcoming, not live
               }
 
               const doc: any = {

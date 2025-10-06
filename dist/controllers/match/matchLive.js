@@ -136,7 +136,7 @@ const getLiveMatches = async (req, res) => {
                     if (uniqueMatches.length > 0) {
                         // Process and save each match
                         const upsertPromises = uniqueMatches.map(async (m) => {
-                            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z;
+                            var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0;
                             const matchId = ((_a = m.matchInfo) === null || _a === void 0 ? void 0 : _a.matchId) || m.matchId || m.id || (typeof m === 'object' ? JSON.stringify(m).slice(0, 40) : String(m).slice(0, 40)) || 'unknown';
                             // Ensure matchId is a string
                             const safeMatchId = typeof matchId === 'string' ? matchId : String(matchId);
@@ -154,28 +154,40 @@ const getLiveMatches = async (req, res) => {
                             const format = ((_f = m.matchInfo) === null || _f === void 0 ? void 0 : _f.matchFormat) || ((_g = m.matchInfo) === null || _g === void 0 ? void 0 : _g.matchType) || m.format || m.type || m.matchType || 'Other';
                             const title = ((_h = m.matchInfo) === null || _h === void 0 ? void 0 : _h.matchDesc) || m.title || m.name || `${team1Name} vs ${team2Name}`;
                             const rawStatus = ((_j = m.matchInfo) === null || _j === void 0 ? void 0 : _j.status) || ((_k = m.matchInfo) === null || _k === void 0 ? void 0 : _k.state) || m.status || m.matchStatus || 'LIVE';
-                            const shortStatus = ((_l = m.matchInfo) === null || _l === void 0 ? void 0 : _l.shortStatus) || m.shortStatus || '';
-                            // Check short status for completion indicators
+                            const rawState = ((_l = m.matchInfo) === null || _l === void 0 ? void 0 : _l.state) || m.state || '';
+                            const shortStatus = ((_m = m.matchInfo) === null || _m === void 0 ? void 0 : _m.shortStatus) || m.shortStatus || '';
+                            // Check raw state first - it's more reliable than status
                             let status = mapStatusToEnum(rawStatus); // Use the mapping function
+                            // Override based on raw state if it's more specific
+                            if (rawState) {
+                                const lowerState = rawState.toLowerCase();
+                                if (lowerState === 'preview' || lowerState === 'upcoming' || lowerState.includes('match starts')) {
+                                    status = 'UPCOMING';
+                                    console.log(`⚠️ Match ${matchId}: rawState="${rawState}" indicates UPCOMING, overriding status`);
+                                }
+                                else if (lowerState === 'complete' || lowerState.includes('complete')) {
+                                    status = 'COMPLETED';
+                                    console.log(`⚠️ Match ${matchId}: rawState="${rawState}" indicates COMPLETED`);
+                                }
+                            }
                             // Override status if shortStatus indicates completion
                             if (shortStatus && (shortStatus.toLowerCase().includes('won') ||
                                 shortStatus.toLowerCase().includes('lead by') ||
                                 shortStatus.toLowerCase().includes('trail by') ||
                                 shortStatus.toLowerCase().includes('match tied') ||
                                 shortStatus.toLowerCase().includes('no result'))) {
-                                console.log(`⚠️ Match ${matchId}: rawStatus="${rawStatus}" but shortStatus="${shortStatus}" indicates COMPLETED`);
+                                console.log(`⚠️ Match ${matchId}: shortStatus="${shortStatus}" indicates COMPLETED`);
                                 status = 'COMPLETED';
                             }
-                            // Check if match should be live based on time (only if not already completed)
-                            if (status !== 'COMPLETED') {
-                                const matchStartTime = ((_m = m.matchInfo) === null || _m === void 0 ? void 0 : _m.startDate) ? new Date(parseInt(m.matchInfo.startDate)) : null;
+                            // Check if match should be live based on time (only if not already completed or upcoming)
+                            if (status !== 'COMPLETED' && status !== 'UPCOMING') {
+                                const matchStartTime = ((_o = m.matchInfo) === null || _o === void 0 ? void 0 : _o.startDate) ? new Date(parseInt(m.matchInfo.startDate)) : null;
                                 const currentTime = new Date();
                                 const shouldBeLive = matchStartTime &&
                                     matchStartTime <= currentTime &&
-                                    (currentTime.getTime() - matchStartTime.getTime()) < (8 * 60 * 60 * 1000) && // Started within 8 hours
-                                    status === 'UPCOMING'; // Only override if currently upcoming
+                                    (currentTime.getTime() - matchStartTime.getTime()) < (8 * 60 * 60 * 1000); // Started within 8 hours
                                 if (shouldBeLive) {
-                                    console.log(`⚡ Overriding status for match ${matchId}: "${rawStatus}" -> "LIVE" (based on start time)`);
+                                    console.log(`⚡ Match ${matchId}: Started recently, marking as LIVE`);
                                     status = 'LIVE';
                                 }
                             }
@@ -185,12 +197,12 @@ const getLiveMatches = async (req, res) => {
                                 console.log(`Match ${matchId} score data available:`, Object.keys(m.matchScore));
                             }
                             // Extract venue information
-                            const venueName = ((_p = (_o = m.matchInfo) === null || _o === void 0 ? void 0 : _o.venueInfo) === null || _p === void 0 ? void 0 : _p.ground) || ((_q = m.matchInfo) === null || _q === void 0 ? void 0 : _q.venue) || ((_r = m.venue) === null || _r === void 0 ? void 0 : _r.name) || m.venue || 'Venue TBD';
-                            const venueCity = ((_t = (_s = m.matchInfo) === null || _s === void 0 ? void 0 : _s.venueInfo) === null || _t === void 0 ? void 0 : _t.city) || ((_u = m.venue) === null || _u === void 0 ? void 0 : _u.city) || '';
-                            const venueCountry = ((_w = (_v = m.matchInfo) === null || _v === void 0 ? void 0 : _v.venueInfo) === null || _w === void 0 ? void 0 : _w.country) || ((_x = m.venue) === null || _x === void 0 ? void 0 : _x.country) || '';
+                            const venueName = ((_q = (_p = m.matchInfo) === null || _p === void 0 ? void 0 : _p.venueInfo) === null || _q === void 0 ? void 0 : _q.ground) || ((_r = m.matchInfo) === null || _r === void 0 ? void 0 : _r.venue) || ((_s = m.venue) === null || _s === void 0 ? void 0 : _s.name) || m.venue || 'Venue TBD';
+                            const venueCity = ((_u = (_t = m.matchInfo) === null || _t === void 0 ? void 0 : _t.venueInfo) === null || _u === void 0 ? void 0 : _u.city) || ((_v = m.venue) === null || _v === void 0 ? void 0 : _v.city) || '';
+                            const venueCountry = ((_x = (_w = m.matchInfo) === null || _w === void 0 ? void 0 : _w.venueInfo) === null || _x === void 0 ? void 0 : _x.country) || ((_y = m.venue) === null || _y === void 0 ? void 0 : _y.country) || '';
                             // Extract date information
                             let startDate = null;
-                            if ((_y = m.matchInfo) === null || _y === void 0 ? void 0 : _y.startDate)
+                            if ((_z = m.matchInfo) === null || _z === void 0 ? void 0 : _z.startDate)
                                 startDate = new Date(parseInt(m.matchInfo.startDate));
                             else if (m.startDate)
                                 startDate = new Date(m.startDate);
@@ -238,16 +250,20 @@ const getLiveMatches = async (req, res) => {
                                 console.log(`⚠️ Skipping match with invalid data: ID=${matchId}, Team1=${team1Name}, Team2=${team2Name}`);
                                 return null; // Skip this match
                             }
-                            // Skip completed matches from being saved as live
+                            // Skip completed and upcoming matches from being saved as live
                             if (status === 'COMPLETED') {
                                 console.log(`⚠️ Skipping completed match: ID=${matchId}, Status=${status}`);
                                 return null; // Skip this match
+                            }
+                            if (status === 'UPCOMING') {
+                                console.log(`⚠️ Skipping upcoming match from live endpoint: ID=${matchId}, Status=${status}`);
+                                return null; // Skip this match - it should be in upcoming, not live
                             }
                             const doc = {
                                 matchId: matchId === null || matchId === void 0 ? void 0 : matchId.toString(),
                                 format: format || 'Other',
                                 title,
-                                shortTitle: ((_z = m.matchInfo) === null || _z === void 0 ? void 0 : _z.shortDesc) || title,
+                                shortTitle: ((_0 = m.matchInfo) === null || _0 === void 0 ? void 0 : _0.shortDesc) || title,
                                 series: {
                                     id: seriesId.toString(),
                                     name: seriesName,
