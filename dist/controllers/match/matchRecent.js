@@ -35,6 +35,20 @@ const getRecentMatches = async (req, res) => {
         const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
         const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
         const RAPIDAPI_MATCHES_RECENT_URL = process.env.RAPIDAPI_MATCHES_RECENT_URL;
+        // Clean up very old completed matches from database (older than 7 days)
+        try {
+            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+            const deleteResult = await Match_1.default.deleteMany({
+                status: 'COMPLETED',
+                updatedAt: { $lt: sevenDaysAgo }
+            });
+            if (deleteResult.deletedCount > 0) {
+                console.log(`Deleted ${deleteResult.deletedCount} old completed matches from database`);
+            }
+        }
+        catch (cleanupError) {
+            console.error('Error cleaning up old matches:', cleanupError);
+        }
         // If API key is available, try to fetch from API first
         if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_RECENT_URL) {
             try {

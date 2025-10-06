@@ -82,6 +82,20 @@ export const getLiveMatches = async (req: Request, res: Response) => {
     const RAPIDAPI_MATCHES_LIVE_URL = process.env.RAPIDAPI_MATCHES_LIVE_URL;
     const RAPIDAPI_MATCHES_INFO_URL = process.env.RAPIDAPI_MATCHES_INFO_URL;
 
+    // Clean up stale live matches from database (older than 2 hours)
+    try {
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      const deleteResult = await Match.deleteMany({
+        status: 'LIVE',
+        updatedAt: { $lt: twoHoursAgo }
+      });
+      if (deleteResult.deletedCount > 0) {
+        console.log(`Deleted ${deleteResult.deletedCount} stale live matches from database`);
+      }
+    } catch (cleanupError) {
+      console.error('Error cleaning up stale matches:', cleanupError);
+    }
+
     // If API key is available, try to fetch from API first
     if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_LIVE_URL) {
       try {

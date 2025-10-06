@@ -35,6 +35,20 @@ const getUpcomingMatches = async (req, res) => {
         const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
         const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
         const RAPIDAPI_MATCHES_UPCOMING_URL = process.env.RAPIDAPI_MATCHES_UPCOMING_URL;
+        // Clean up stale upcoming matches from database (older than 6 hours)
+        try {
+            const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
+            const deleteResult = await Match_1.default.deleteMany({
+                status: 'UPCOMING',
+                updatedAt: { $lt: sixHoursAgo }
+            });
+            if (deleteResult.deletedCount > 0) {
+                console.log(`Deleted ${deleteResult.deletedCount} stale upcoming matches from database`);
+            }
+        }
+        catch (cleanupError) {
+            console.error('Error cleaning up stale upcoming matches:', cleanupError);
+        }
         // If API key is available, try to fetch from API first
         if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_UPCOMING_URL) {
             try {
