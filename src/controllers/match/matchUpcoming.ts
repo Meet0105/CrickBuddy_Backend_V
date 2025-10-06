@@ -47,29 +47,45 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
     // If API key is available, try to fetch from API first
     if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_UPCOMING_URL) {
       try {
-        console.log('Fetching upcoming matches from API');
+        console.log('=== FETCHING UPCOMING MATCHES FROM API ===');
+        console.log('API URL:', RAPIDAPI_MATCHES_UPCOMING_URL);
+        console.log('API Host:', RAPIDAPI_HOST);
+        console.log('API Key present:', !!RAPIDAPI_KEY);
+        
         const headers = {
           'x-rapidapi-key': RAPIDAPI_KEY,
           'x-rapidapi-host': RAPIDAPI_HOST
         };
 
         const response = await axios.get(RAPIDAPI_MATCHES_UPCOMING_URL, { headers, timeout: 15000 });
+        console.log('API Response Status:', response.status);
+        console.log('API Response has data:', !!response.data);
+        console.log('API Response has typeMatches:', !!response.data?.typeMatches);
 
         // Process API response and save to database
         if (response.data && response.data.typeMatches) {
+          console.log('Available match types:', response.data.typeMatches.map((t: any) => t.matchType));
+          
           const upcomingMatchesData = response.data.typeMatches.find((type: any) => 
             type.matchType === 'Upcoming Matches'
           );
+          
+          console.log('Found Upcoming Matches section:', !!upcomingMatchesData);
 
           if (upcomingMatchesData && upcomingMatchesData.seriesMatches) {
+            console.log('Number of series with matches:', upcomingMatchesData.seriesMatches.length);
+            
             const matchesList: any[] = [];
             
             // Extract matches from series
             for (const seriesMatch of upcomingMatchesData.seriesMatches) {
               if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
+                console.log(`Found ${seriesMatch.seriesAdWrapper.matches.length} matches in series`);
                 matchesList.push(...seriesMatch.seriesAdWrapper.matches);
               }
             }
+            
+            console.log(`Total matches extracted from API: ${matchesList.length}`);
 
             // Process and save each match
             const upsertPromises = matchesList.map(async (m) => {
@@ -205,10 +221,19 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
             return res.json(validUpcomingMatches);
           }
         }
-      } catch (apiError) {
-        console.error('API fetch failed for upcoming matches:', apiError);
+      } catch (apiError: any) {
+        console.error('=== API FETCH FAILED FOR UPCOMING MATCHES ===');
+        console.error('Error message:', apiError.message);
+        console.error('Error response status:', apiError.response?.status);
+        console.error('Error response data:', apiError.response?.data);
+        console.error('Full error:', apiError);
         // Continue to fallback logic
       }
+    } else {
+      console.log('=== API KEYS NOT CONFIGURED ===');
+      console.log('RAPIDAPI_KEY present:', !!RAPIDAPI_KEY);
+      console.log('RAPIDAPI_HOST present:', !!RAPIDAPI_HOST);
+      console.log('RAPIDAPI_MATCHES_UPCOMING_URL present:', !!RAPIDAPI_MATCHES_UPCOMING_URL);
     }
 
     // Fallback to database if API config is missing or API call failed - only UPCOMING matches
