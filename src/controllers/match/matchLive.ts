@@ -183,19 +183,36 @@ export const getLiveMatches = async (req: Request, res: Response) => {
               const format = m.matchInfo?.matchFormat || m.matchInfo?.matchType || m.format || m.type || m.matchType || 'Other';
               const title = m.matchInfo?.matchDesc || m.title || m.name || `${team1Name} vs ${team2Name}`;
               const rawStatus = m.matchInfo?.status || m.matchInfo?.state || m.status || m.matchStatus || 'LIVE';
+              const shortStatus = m.matchInfo?.shortStatus || m.shortStatus || '';
+              
+              // Check short status for completion indicators
               let status = mapStatusToEnum(rawStatus); // Use the mapping function
+              
+              // Override status if shortStatus indicates completion
+              if (shortStatus && (
+                shortStatus.toLowerCase().includes('won') ||
+                shortStatus.toLowerCase().includes('lead by') ||
+                shortStatus.toLowerCase().includes('trail by') ||
+                shortStatus.toLowerCase().includes('match tied') ||
+                shortStatus.toLowerCase().includes('no result')
+              )) {
+                console.log(`⚠️ Match ${matchId}: rawStatus="${rawStatus}" but shortStatus="${shortStatus}" indicates COMPLETED`);
+                status = 'COMPLETED';
+              }
 
-              // Check if match should be live based on time
-              const matchStartTime = m.matchInfo?.startDate ? new Date(parseInt(m.matchInfo.startDate)) : null;
-              const currentTime = new Date();
-              const shouldBeLive = matchStartTime &&
-                matchStartTime <= currentTime &&
-                (currentTime.getTime() - matchStartTime.getTime()) < (8 * 60 * 60 * 1000) && // Started within 8 hours
-                status === 'UPCOMING'; // Only override if currently upcoming
+              // Check if match should be live based on time (only if not already completed)
+              if (status !== 'COMPLETED') {
+                const matchStartTime = m.matchInfo?.startDate ? new Date(parseInt(m.matchInfo.startDate)) : null;
+                const currentTime = new Date();
+                const shouldBeLive = matchStartTime &&
+                  matchStartTime <= currentTime &&
+                  (currentTime.getTime() - matchStartTime.getTime()) < (8 * 60 * 60 * 1000) && // Started within 8 hours
+                  status === 'UPCOMING'; // Only override if currently upcoming
 
-              if (shouldBeLive) {
-                console.log(`⚡ Overriding status for match ${matchId}: "${rawStatus}" -> "LIVE" (based on start time)`);
-                status = 'LIVE';
+                if (shouldBeLive) {
+                  console.log(`⚡ Overriding status for match ${matchId}: "${rawStatus}" -> "LIVE" (based on start time)`);
+                  status = 'LIVE';
+                }
               }
 
               console.log(`Match ${matchId}: rawStatus="${rawStatus}" -> mappedStatus="${status}"`);
@@ -264,6 +281,12 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                 console.log(`⚠️ Skipping match with invalid data: ID=${matchId}, Team1=${team1Name}, Team2=${team2Name}`);
                 return null; // Skip this match
               }
+              
+              // Skip completed matches from being saved as live
+              if (status === 'COMPLETED') {
+                console.log(`⚠️ Skipping completed match: ID=${matchId}, Status=${status}`);
+                return null; // Skip this match
+              }
 
               const doc: any = {
                 matchId: matchId?.toString(),
@@ -316,11 +339,18 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                   ]
                 },
                 {
-                  // Exclude matches that ended more than 6 hours ago
+                  // Exclude matches with completed short status
                   $or: [
-                    { endDate: { $exists: false } },
-                    { endDate: null },
-                    { endDate: { $gte: new Date(Date.now() - 6 * 60 * 60 * 1000) } }
+                    { 'raw.shortstatus': { $exists: false } },
+                    { 'raw.shortstatus': { $not: { $regex: 'won|lead by|trail by|tied|no result', $options: 'i' } } }
+                  ]
+                },
+                {
+                  // Exclude matches that started more than 2 days ago (likely stale data)
+                  $or: [
+                    { startDate: { $exists: false } },
+                    { startDate: null },
+                    { startDate: { $gte: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) } }
                   ]
                 }
               ]
@@ -489,11 +519,18 @@ export const getLiveMatches = async (req: Request, res: Response) => {
           ]
         },
         {
-          // Exclude matches that ended more than 6 hours ago
+          // Exclude matches with completed short status
           $or: [
-            { endDate: { $exists: false } },
-            { endDate: null },
-            { endDate: { $gte: new Date(Date.now() - 6 * 60 * 60 * 1000) } }
+            { 'raw.shortstatus': { $exists: false } },
+            { 'raw.shortstatus': { $not: { $regex: 'won|lead by|trail by|tied|no result', $options: 'i' } } }
+          ]
+        },
+        {
+          // Exclude matches that started more than 2 days ago (likely stale data)
+          $or: [
+            { startDate: { $exists: false } },
+            { startDate: null },
+            { startDate: { $gte: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) } }
           ]
         }
       ]
