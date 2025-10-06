@@ -324,6 +324,24 @@ const getLiveMatches = async (req, res) => {
                         const processedMatches = await Promise.all(liveMatches.map(async (match) => {
                             var _a;
                             console.log(`Processing match ${match.matchId}: status="${match.status}", isLive=${match.isLive}, startDate=${match.startDate}`);
+                            // Re-validate match status based on raw data to filter out stale incorrect data
+                            if (match.raw) {
+                                const rawState = match.raw.state || '';
+                                const shortStatus = match.raw.shortstatus || '';
+                                // Check if this match should actually be UPCOMING or COMPLETED
+                                const lowerState = rawState.toLowerCase();
+                                const lowerShortStatus = shortStatus.toLowerCase();
+                                if (lowerState === 'preview' || lowerState === 'upcoming' || lowerState.includes('match starts')) {
+                                    console.log(`⚠️ Match ${match.matchId} has state "${rawState}" - should be UPCOMING, not LIVE. Skipping.`);
+                                    return null; // Skip this match
+                                }
+                                if (lowerState === 'complete' || lowerState.includes('complete') ||
+                                    lowerShortStatus.includes('won') || lowerShortStatus.includes('lead by') ||
+                                    lowerShortStatus.includes('trail by')) {
+                                    console.log(`⚠️ Match ${match.matchId} has state "${rawState}" or shortStatus "${shortStatus}" - should be COMPLETED, not LIVE. Skipping.`);
+                                    return null; // Skip this match
+                                }
+                            }
                             // Check if match should be live based on time
                             const currentTime = new Date();
                             const shouldBeLive = match.startDate &&
@@ -429,8 +447,10 @@ const getLiveMatches = async (req, res) => {
                             }
                             return processedMatch;
                         }));
-                        console.log(`Found ${processedMatches.length} live matches from database`);
-                        return res.json(processedMatches);
+                        // Filter out null values (skipped matches)
+                        const validMatches = processedMatches.filter(m => m !== null);
+                        console.log(`Found ${validMatches.length} valid live matches from database (filtered ${processedMatches.length - validMatches.length} invalid)`);
+                        return res.json(validMatches);
                     }
                 }
             }
@@ -494,6 +514,24 @@ const getLiveMatches = async (req, res) => {
         const processedMatches = await Promise.all(deduplicatedMatches.map(async (match) => {
             var _a;
             console.log(`Processing match ${match.matchId}: status="${match.status}", isLive=${match.isLive}, startDate=${match.startDate}, endDate=${match.endDate}`);
+            // Re-validate match status based on raw data to filter out stale incorrect data
+            if (match.raw) {
+                const rawState = match.raw.state || '';
+                const shortStatus = match.raw.shortstatus || '';
+                // Check if this match should actually be UPCOMING or COMPLETED
+                const lowerState = rawState.toLowerCase();
+                const lowerShortStatus = shortStatus.toLowerCase();
+                if (lowerState === 'preview' || lowerState === 'upcoming' || lowerState.includes('match starts')) {
+                    console.log(`⚠️ Match ${match.matchId} has state "${rawState}" - should be UPCOMING, not LIVE. Skipping.`);
+                    return null; // Skip this match
+                }
+                if (lowerState === 'complete' || lowerState.includes('complete') ||
+                    lowerShortStatus.includes('won') || lowerShortStatus.includes('lead by') ||
+                    lowerShortStatus.includes('trail by')) {
+                    console.log(`⚠️ Match ${match.matchId} has state "${rawState}" or shortStatus "${shortStatus}" - should be COMPLETED, not LIVE. Skipping.`);
+                    return null; // Skip this match
+                }
+            }
             // Check if match should be live based on time
             const currentTime = new Date();
             const shouldBeLive = match.startDate &&
@@ -599,8 +637,10 @@ const getLiveMatches = async (req, res) => {
             }
             return processedMatch;
         }));
+        // Filter out null values (skipped matches) first
+        const validMatches = processedMatches.filter(m => m !== null);
         // Filter out matches that have actually ended
-        const actuallyLiveMatches = processedMatches.filter(match => {
+        const actuallyLiveMatches = validMatches.filter(match => {
             var _a, _b, _c, _d;
             // Check if match has ended more than 48 hours ago
             if (match.endDate && match.endDate < new Date(Date.now() - 48 * 60 * 60 * 1000)) {
@@ -636,7 +676,7 @@ const getLiveMatches = async (req, res) => {
             }
             return true;
         });
-        console.log(`Found ${actuallyLiveMatches.length} actually live matches from database (filtered from ${processedMatches.length})`);
+        console.log(`Found ${actuallyLiveMatches.length} actually live matches from database (filtered ${processedMatches.length - validMatches.length} invalid, total processed: ${processedMatches.length})`);
         return res.json(actuallyLiveMatches);
     }
     catch (error) {
