@@ -463,9 +463,39 @@ export function extractMatchInfo(matchInfo: any, matchScore: any, originalMatch:
 }
 
 // Helper function to extract current scores from scorecard data
-export function extractScoresFromScorecard(scorecardData: any): { team1Score: any, team2Score: any } {
+export function extractScoresFromScorecard(scorecardData: any, matchData?: any): { team1Score: any, team2Score: any } {
   const team1Score = { runs: 0, wickets: 0, overs: 0, balls: 0, runRate: 0 };
   const team2Score = { runs: 0, wickets: 0, overs: 0, balls: 0, runRate: 0 };
+  
+  // Determine which team batted first from toss or match data
+  let team2BattedFirst = false; // Default: team1 batted first
+  
+  if (matchData && matchData.raw) {
+    const tossStatus = matchData.raw.tossstatus || matchData.raw.tossStatus || '';
+    const team1Name = matchData.raw.team1?.teamname || matchData.raw.team1?.teamName || matchData.teams?.[0]?.teamName || '';
+    const team2Name = matchData.raw.team2?.teamname || matchData.raw.team2?.teamName || matchData.teams?.[1]?.teamName || '';
+    
+    // Check toss status to see who batted first
+    if (tossStatus.toLowerCase().includes('opt to bat') || tossStatus.toLowerCase().includes('elected to bat')) {
+      // The team mentioned in toss status batted first
+      if (team2Name && tossStatus.includes(team2Name)) {
+        team2BattedFirst = true;
+        console.log(`Detected: ${team2Name} (team2) batted first based on toss`);
+      } else if (team1Name && tossStatus.includes(team1Name)) {
+        team2BattedFirst = false;
+        console.log(`Detected: ${team1Name} (team1) batted first based on toss`);
+      }
+    } else if (tossStatus.toLowerCase().includes('opt to bowl') || tossStatus.toLowerCase().includes('elected to bowl')) {
+      // The team mentioned in toss status bowled first (so the OTHER team batted first)
+      if (team2Name && tossStatus.includes(team2Name)) {
+        team2BattedFirst = false; // team2 bowled, so team1 batted
+        console.log(`Detected: ${team1Name} (team1) batted first (${team2Name} opted to bowl)`);
+      } else if (team1Name && tossStatus.includes(team1Name)) {
+        team2BattedFirst = true; // team1 bowled, so team2 batted
+        console.log(`Detected: ${team2Name} (team2) batted first (${team1Name} opted to bowl)`);
+      }
+    }
+  }
 
   // Handle different scorecard data structures
   let inningsData = null;
@@ -751,29 +781,56 @@ export function extractScoresFromScorecard(scorecardData: any): { team1Score: an
     
     console.log(`Innings ${index + 1}: runs=${runs}, wickets=${wickets}, overs=${overs}`);
     
-    // Assign to team1 or team2 based on innings order
-    if (index === 0) {
-      team1Score.runs = runs;
-      team1Score.wickets = wickets;
-      team1Score.overs = overs;
+    // Determine which team batted in this innings
+    const inningsId = inningsData.inningsid || inningsData.inningsId || (index + 1).toString();
+    const inningsNum = parseInt(inningsId);
+    
+    // In cricket scorecard:
+    // - Innings 1 & 3 = Team that batted first
+    // - Innings 2 & 4 = Team that batted second
+    
+    const isFirstBattingTeamInnings = (inningsNum % 2 === 1); // Innings 1, 3, 5... = first batting team
+    
+    // Determine which team score to update based on who batted first
+    let updateTeam1 = false;
+    if (team2BattedFirst) {
+      // If team2 batted first, then:
+      // - Odd innings (1,3) = team2
+      // - Even innings (2,4) = team1
+      updateTeam1 = !isFirstBattingTeamInnings;
+    } else {
+      // If team1 batted first (default), then:
+      // - Odd innings (1,3) = team1
+      // - Even innings (2,4) = team2
+      updateTeam1 = isFirstBattingTeamInnings;
+    }
+    
+    if (updateTeam1) {
+      // Add to team1's score (accumulate across innings)
+      team1Score.runs += runs;
+      team1Score.wickets = wickets; // Use latest wickets
+      team1Score.overs += overs;
       // Calculate balls from overs (e.g., 12.3 overs = 12*6 + 3 = 75 balls)
-      team1Score.balls = Math.floor(overs) * 6 + Math.round((overs - Math.floor(overs)) * 10);
+      team1Score.balls = Math.floor(team1Score.overs) * 6 + Math.round((team1Score.overs - Math.floor(team1Score.overs)) * 10);
       
-      // Calculate run rate if not provided and overs > 0
-      if (!team1Score.runRate && overs > 0) {
-        team1Score.runRate = parseFloat((runs / overs).toFixed(2));
+      // Calculate run rate if overs > 0
+      if (team1Score.overs > 0) {
+        team1Score.runRate = parseFloat((team1Score.runs / team1Score.overs).toFixed(2));
       }
-    } else if (index === 1) {
-      team2Score.runs = runs;
-      team2Score.wickets = wickets;
-      team2Score.overs = overs;
+      console.log(`Assigned innings ${inningsNum} to team1`);
+    } else {
+      // Add to team2's score (accumulate across innings)
+      team2Score.runs += runs;
+      team2Score.wickets = wickets; // Use latest wickets
+      team2Score.overs += overs;
       // Calculate balls from overs
-      team2Score.balls = Math.floor(overs) * 6 + Math.round((overs - Math.floor(overs)) * 10);
+      team2Score.balls = Math.floor(team2Score.overs) * 6 + Math.round((team2Score.overs - Math.floor(team2Score.overs)) * 10);
       
-      // Calculate run rate if not provided and overs > 0
-      if (!team2Score.runRate && overs > 0) {
-        team2Score.runRate = parseFloat((runs / overs).toFixed(2));
+      // Calculate run rate if overs > 0
+      if (team2Score.overs > 0) {
+        team2Score.runRate = parseFloat((team2Score.runs / team2Score.overs).toFixed(2));
       }
+      console.log(`Assigned innings ${inningsNum} to team2`);
     }
   });
 

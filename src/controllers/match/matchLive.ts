@@ -350,7 +350,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
               // If we have scorecard data, extract scores from it and update team scores
               if (match.scorecard && match.scorecard.scorecard && Array.isArray(match.scorecard.scorecard)) {
                 console.log(`Extracting scores from scorecard for match ${match.matchId}`);
-                const { team1Score, team2Score } = extractScoresFromScorecard(match.scorecard);
+                const { team1Score, team2Score } = extractScoresFromScorecard(match.scorecard, match);
                 
                 // Update team scores if we have valid data
                 if (processedMatch.teams && processedMatch.teams.length >= 2) {
@@ -405,7 +405,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
 
                     if (updatedMatch) {
                       // Extract scores from scorecard
-                      const { team1Score, team2Score } = extractScoresFromScorecard(scorecardResponse.data);
+                      const { team1Score, team2Score } = extractScoresFromScorecard(scorecardResponse.data, updatedMatch);
                       
                       // Update team scores
                       if (updatedMatch.teams && updatedMatch.teams.length >= 2) {
@@ -549,7 +549,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
       // If we have scorecard data, extract scores from it and update team scores
       if (match.scorecard && match.scorecard.scorecard && Array.isArray(match.scorecard.scorecard)) {
         console.log(`Extracting scores from scorecard for match ${match.matchId}`);
-        const { team1Score, team2Score } = extractScoresFromScorecard(match.scorecard);
+        const { team1Score, team2Score} = extractScoresFromScorecard(match.scorecard, match);
         
         // Update team scores if we have valid data
         if (processedMatch.teams && processedMatch.teams.length >= 2) {
@@ -604,7 +604,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
 
             if (updatedMatch) {
               // Extract scores from scorecard
-              const { team1Score, team2Score } = extractScoresFromScorecard(scorecardResponse.data);
+              const { team1Score, team2Score } = extractScoresFromScorecard(scorecardResponse.data, updatedMatch);
               
               // Update team scores
               if (updatedMatch.teams && updatedMatch.teams.length >= 2) {

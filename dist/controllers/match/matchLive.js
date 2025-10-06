@@ -298,7 +298,7 @@ const getLiveMatches = async (req, res) => {
                             // If we have scorecard data, extract scores from it and update team scores
                             if (match.scorecard && match.scorecard.scorecard && Array.isArray(match.scorecard.scorecard)) {
                                 console.log(`Extracting scores from scorecard for match ${match.matchId}`);
-                                const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(match.scorecard);
+                                const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(match.scorecard, match);
                                 // Update team scores if we have valid data
                                 if (processedMatch.teams && processedMatch.teams.length >= 2) {
                                     // Only update if we have actual scores (not all zeros)
@@ -341,7 +341,7 @@ const getLiveMatches = async (req, res) => {
                                         const updatedMatch = await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, { $set: updateData }, { new: true });
                                         if (updatedMatch) {
                                             // Extract scores from scorecard
-                                            const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(scorecardResponse.data);
+                                            const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(scorecardResponse.data, updatedMatch);
                                             // Update team scores
                                             if (updatedMatch.teams && updatedMatch.teams.length >= 2) {
                                                 updatedMatch.teams[0].score = team1Score;
@@ -461,7 +461,7 @@ const getLiveMatches = async (req, res) => {
             // If we have scorecard data, extract scores from it and update team scores
             if (match.scorecard && match.scorecard.scorecard && Array.isArray(match.scorecard.scorecard)) {
                 console.log(`Extracting scores from scorecard for match ${match.matchId}`);
-                const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(match.scorecard);
+                const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(match.scorecard, match);
                 // Update team scores if we have valid data
                 if (processedMatch.teams && processedMatch.teams.length >= 2) {
                     // Only update if we have actual scores (not all zeros)
@@ -504,7 +504,7 @@ const getLiveMatches = async (req, res) => {
                         const updatedMatch = await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, { $set: updateData }, { new: true });
                         if (updatedMatch) {
                             // Extract scores from scorecard
-                            const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(scorecardResponse.data);
+                            const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(scorecardResponse.data, updatedMatch);
                             // Update team scores
                             if (updatedMatch.teams && updatedMatch.teams.length >= 2) {
                                 updatedMatch.teams[0].score = team1Score;
