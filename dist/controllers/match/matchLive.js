@@ -293,11 +293,11 @@ const getLiveMatches = async (req, res) => {
                                     ]
                                 },
                                 {
-                                    // Exclude matches that started more than 2 days ago (likely stale data)
+                                    // Exclude matches that started more than 7 days ago (likely stale data)
                                     $or: [
                                         { startDate: { $exists: false } },
                                         { startDate: null },
-                                        { startDate: { $gte: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) } }
+                                        { startDate: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } }
                                     ]
                                 }
                             ]
@@ -445,11 +445,11 @@ const getLiveMatches = async (req, res) => {
                     ]
                 },
                 {
-                    // Exclude matches that started more than 2 days ago (likely stale data)
+                    // Exclude matches that started more than 7 days ago (likely stale data)
                     $or: [
                         { startDate: { $exists: false } },
                         { startDate: null },
-                        { startDate: { $gte: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) } }
+                        { startDate: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } }
                     ]
                 }
             ]
