@@ -192,34 +192,35 @@ export const getRecentMatches = async (req: Request, res: Response) => {
 
             await Promise.all(upsertPromises);
 
-            // Return from database after saving
+            // Return from database after saving - only COMPLETED matches
             const recentMatches = await Match.find({ 
-              $and: [
-                {
-                  $or: [
-                    { status: 'COMPLETED' },
-                    { status: 'Complete' },
-                    { status: { $regex: 'Complete', $options: 'i' } },
-                    { status: { $regex: 'complete', $options: 'i' } },
-                    { status: { $regex: 'won', $options: 'i' } },
-                    { status: { $regex: 'Finished', $options: 'i' } },
-                    { status: { $regex: 'finished', $options: 'i' } },
-                    { 
-                      endDate: { $lte: new Date() },
-                      status: { $nin: ['UPCOMING', 'Upcoming', 'upcoming', 'LIVE', 'Live', 'live'] }
-                    }
-                  ]
-                },
-                {
-                  status: { $nin: ['UPCOMING', 'Upcoming', 'upcoming', 'LIVE', 'Live', 'live'] }
-                }
-              ]
+              status: 'COMPLETED'
             })
-            .sort({ endDate: -1 })
+            .sort({ endDate: -1, updatedAt: -1 })
             .limit(Number(limit))
             .select('matchId title shortTitle teams venue series endDate result format status');
             
-            return res.json(recentMatches);
+            // Filter out any matches that aren't actually completed
+            const validRecentMatches = recentMatches.filter(match => {
+              // Double-check the status
+              if (match.status !== 'COMPLETED') return false;
+              
+              // Check raw data if available
+              if (match.raw) {
+                const rawState = (match.raw.state || '').toLowerCase();
+                const rawStatus = (match.raw.status || '').toLowerCase();
+                
+                // Skip if raw data indicates it's not completed
+                if (rawState.includes('upcoming') || rawState.includes('preview') || 
+                    rawStatus.includes('upcoming') || rawStatus.includes('preview')) {
+                  return false;
+                }
+              }
+              
+              return true;
+            });
+            
+            return res.json(validRecentMatches);
           }
         }
       } catch (apiError) {
@@ -228,32 +229,13 @@ export const getRecentMatches = async (req: Request, res: Response) => {
       }
     }
 
-    // Fallback to database if API config is missing or API call failed
+    // Fallback to database if API config is missing or API call failed - only COMPLETED matches
     console.log('Falling back to database for recent matches');
     const dbMatches = await Match.find({ 
-      $and: [
-        {
-          $or: [
-            { status: 'COMPLETED' },
-            { status: 'Complete' },
-            { status: { $regex: 'Complete', $options: 'i' } },
-            { status: { $regex: 'complete', $options: 'i' } },
-            { status: { $regex: 'won', $options: 'i' } },
-            { status: { $regex: 'Finished', $options: 'i' } },
-            { status: { $regex: 'finished', $options: 'i' } },
-            { 
-              endDate: { $lte: new Date() },
-              status: { $nin: ['UPCOMING', 'Upcoming', 'upcoming', 'LIVE', 'Live', 'live'] }
-            }
-          ]
-        },
-        {
-          status: { $nin: ['UPCOMING', 'Upcoming', 'upcoming', 'LIVE', 'Live', 'live'] }
-        }
-      ]
+      status: 'COMPLETED'
     })
-    .sort({ endDate: -1 })
-    .limit(Number(limit))
+    .sort({ endDate: -1, updatedAt: -1 })
+    .limit(Number(limit) * 2) // Get more to filter
     .select('matchId title shortTitle teams venue series endDate result format status raw');
 
     console.log(`Found ${dbMatches.length} matches in database`);
@@ -277,8 +259,30 @@ export const getRecentMatches = async (req: Request, res: Response) => {
       return match;
     });
 
-    console.log('Returning processed matches');
-    return res.json(processedMatches);
+    // Filter out any non-completed matches
+    const validMatches = processedMatches.filter(match => {
+      if (match.status !== 'COMPLETED') {
+        console.log(`Filtering out match ${match.matchId} - status is ${match.status}, not COMPLETED`);
+        return false;
+      }
+      
+      // Check raw data if available
+      if (match.raw) {
+        const rawState = (match.raw.state || '').toLowerCase();
+        const rawStatus = (match.raw.status || '').toLowerCase();
+        
+        if (rawState.includes('upcoming') || rawState.includes('preview') || 
+            rawStatus.includes('upcoming') || rawStatus.includes('preview')) {
+          console.log(`Filtering out match ${match.matchId} - raw data indicates not completed`);
+          return false;
+        }
+      }
+      
+      return true;
+    }).slice(0, Number(limit)); // Limit after filtering
+    
+    console.log(`Returning ${validMatches.length} valid completed matches (filtered from ${processedMatches.length})`);
+    return res.json(validMatches);
   } catch (error) {
     console.error('getRecentMatches error:', error);
     
@@ -288,28 +292,9 @@ export const getRecentMatches = async (req: Request, res: Response) => {
       try {
         const { limit = 10 } = req.query;
         const recentMatches = await Match.find({ 
-          $and: [
-            {
-              $or: [
-                { status: 'COMPLETED' },
-                { status: 'Complete' },
-                { status: { $regex: 'Complete', $options: 'i' } },
-                { status: { $regex: 'complete', $options: 'i' } },
-                { status: { $regex: 'won', $options: 'i' } },
-                { status: { $regex: 'Finished', $options: 'i' } },
-                { status: { $regex: 'finished', $options: 'i' } },
-                { 
-                  endDate: { $lte: new Date() },
-                  status: { $nin: ['UPCOMING', 'Upcoming', 'upcoming', 'LIVE', 'Live', 'live'] }
-                }
-              ]
-            },
-            {
-              status: { $nin: ['UPCOMING', 'Upcoming', 'upcoming', 'LIVE', 'Live', 'live'] }
-            }
-          ]
+          status: 'COMPLETED'
         })
-        .sort({ endDate: -1 })
+        .sort({ endDate: -1, updatedAt: -1 })
         .limit(Number(limit))
         .select('matchId title shortTitle teams venue series endDate result format status');
         
@@ -323,28 +308,9 @@ export const getRecentMatches = async (req: Request, res: Response) => {
     try {
       const { limit = 10 } = req.query;
       const recentMatches = await Match.find({ 
-        $and: [
-          {
-            $or: [
-              { status: 'COMPLETED' },
-              { status: 'Complete' },
-              { status: { $regex: 'Complete', $options: 'i' } },
-              { status: { $regex: 'complete', $options: 'i' } },
-              { status: { $regex: 'won', $options: 'i' } },
-              { status: { $regex: 'Finished', $options: 'i' } },
-              { status: { $regex: 'finished', $options: 'i' } },
-              { 
-                endDate: { $lte: new Date() },
-                status: { $nin: ['UPCOMING', 'Upcoming', 'upcoming', 'LIVE', 'Live', 'live'] }
-              }
-            ]
-          },
-          {
-            status: { $nin: ['UPCOMING', 'Upcoming', 'upcoming', 'LIVE', 'Live', 'live'] }
-          }
-        ]
+        status: 'COMPLETED'
       })
-      .sort({ endDate: -1 })
+      .sort({ endDate: -1, updatedAt: -1 })
       .limit(Number(limit))
       .select('matchId title shortTitle teams venue series endDate result format status');
       
