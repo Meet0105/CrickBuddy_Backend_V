@@ -1,43 +1,11 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getUpcomingMatches = void 0;
 const Match_1 = __importDefault(require("../../models/Match"));
+const axios_1 = __importDefault(require("axios"));
 const matchUpcomingHelpers_1 = require("./matchUpcomingHelpers");
 // Helper function to map API status to our enum values
 const mapStatusToEnum = (status) => {
@@ -61,38 +29,30 @@ const mapStatusToEnum = (status) => {
     return 'UPCOMING';
 };
 const getUpcomingMatches = async (req, res) => {
-    var _a, _b, _c;
+    var _a;
     try {
         const { limit = 10 } = req.query;
         const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
         const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
         const RAPIDAPI_MATCHES_UPCOMING_URL = process.env.RAPIDAPI_MATCHES_UPCOMING_URL;
-        // Import feature flags
-        const { isFeatureEnabled } = await Promise.resolve().then(() => __importStar(require('../../config/apiConfig')));
-        // If API key is available and feature is enabled, try to fetch from API first
-        if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_UPCOMING_URL && isFeatureEnabled('ENABLE_UPCOMING_MATCHES_API')) {
+        // If API key is available, try to fetch from API first
+        if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_UPCOMING_URL) {
             try {
                 console.log('Fetching upcoming matches from API');
                 const headers = {
                     'x-rapidapi-key': RAPIDAPI_KEY,
                     'x-rapidapi-host': RAPIDAPI_HOST
                 };
-                const { rapidApiRateLimiter } = await Promise.resolve().then(() => __importStar(require('../../utils/rateLimiter')));
-                const response = await rapidApiRateLimiter.makeRequest(RAPIDAPI_MATCHES_UPCOMING_URL, { headers });
+                const response = await axios_1.default.get(RAPIDAPI_MATCHES_UPCOMING_URL, { headers, timeout: 15000 });
                 // Process API response and save to database
-                if (response && response.typeMatches) {
-                    // Process all match types (International, Domestic, Women) instead of looking for 'Upcoming Matches'
-                    const allMatchTypes = response.typeMatches;
-                    if (allMatchTypes && allMatchTypes.length > 0) {
+                if (response.data && response.data.typeMatches) {
+                    const upcomingMatchesData = response.data.typeMatches.find((type) => type.matchType === 'Upcoming Matches');
+                    if (upcomingMatchesData && upcomingMatchesData.seriesMatches) {
                         const matchesList = [];
-                        // Extract matches from all match types (International, Domestic, Women)
-                        for (const matchType of allMatchTypes) {
-                            if (matchType.seriesMatches) {
-                                for (const seriesMatch of matchType.seriesMatches) {
-                                    if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
-                                        matchesList.push(...seriesMatch.seriesAdWrapper.matches);
-                                    }
-                                }
+                        // Extract matches from series
+                        for (const seriesMatch of upcomingMatchesData.seriesMatches) {
+                            if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
+                                matchesList.push(...seriesMatch.seriesAdWrapper.matches);
                             }
                         }
                         // Process and save each match
@@ -211,15 +171,7 @@ const getUpcomingMatches = async (req, res) => {
                 }
             }
             catch (apiError) {
-                if (((_a = apiError === null || apiError === void 0 ? void 0 : apiError.response) === null || _a === void 0 ? void 0 : _a.status) === 403) {
-                    console.warn('⚠️ API access forbidden (403) - subscription may not include this endpoint');
-                }
-                else if (((_b = apiError === null || apiError === void 0 ? void 0 : apiError.response) === null || _b === void 0 ? void 0 : _b.status) === 429) {
-                    console.warn('⚠️ API rate limit exceeded (429) - using cached data');
-                }
-                else {
-                    console.error('API fetch failed for upcoming matches:', (apiError === null || apiError === void 0 ? void 0 : apiError.message) || apiError);
-                }
+                console.error('API fetch failed for upcoming matches:', apiError);
                 // Continue to fallback logic
             }
         }
@@ -262,7 +214,7 @@ const getUpcomingMatches = async (req, res) => {
     catch (error) {
         console.error('getUpcomingMatches error:', error);
         // Handle rate limiting
-        if (((_c = error === null || error === void 0 ? void 0 : error.response) === null || _c === void 0 ? void 0 : _c.status) === 429) {
+        if (((_a = error === null || error === void 0 ? void 0 : error.response) === null || _a === void 0 ? void 0 : _a.status) === 429) {
             // Fallback to database if API rate limit exceeded
             try {
                 const { limit = 10 } = req.query;

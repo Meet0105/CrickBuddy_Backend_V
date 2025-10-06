@@ -1,15 +1,14 @@
 import { Request, Response } from 'express';
 import Match from '../../models/Match';
 import { extractTeamScore, fetchMatchInfo, fetchScorecard, fetchHistoricalScorecard, fetchCommentary, fetchHistoricalCommentary, fetchOvers } from './matchDetailHelpers';
-import { isFeatureEnabled } from '../../config/apiConfig';
 
 // Helper function to map API status to our enum values
 const mapStatusToEnum = (status: string): 'UPCOMING' | 'LIVE' | 'COMPLETED' | 'ABANDONED' | 'CANCELLED' => {
   if (!status) return 'UPCOMING';
-
+  
   // Convert to lowercase for case-insensitive comparison
   const lowerStatus = status.toLowerCase();
-
+  
   // Map LIVE status patterns
   if (lowerStatus.includes('live') ||
     lowerStatus.includes('in progress') ||
@@ -69,64 +68,38 @@ const mapStatusToEnum = (status: string): 'UPCOMING' | 'LIVE' | 'COMPLETED' | 'A
   return 'UPCOMING';
 };
 
-// Interface for match data from API
-interface ApiMatchData {
-  matchInfo?: {
-    matchId?: string | number;
-    matchDesc?: string;
-    matchFormat?: string;
-    state?: string;
-    startDate?: string;
-    endDate?: string;
-    seriesId?: string | number;
-    seriesName?: string;
-    team1?: {
-      teamId?: string | number;
-      teamName?: string;
-      teamSName?: string;
-      teamid?: string | number;
-      teamname?: string;
-      teamsname?: string;
-    };
-    team2?: {
-      teamId?: string | number;
-      teamName?: string;
-      teamSName?: string;
-      teamid?: string | number;
-      teamname?: string;
-      teamsname?: string;
-    };
-    venueInfo?: {
-      ground?: string;
-      city?: string;
-      country?: string;
-    };
-  };
-  matchId?: string | number;
-  id?: string | number;
-  match_id?: string | number;
-  name?: string;
-  title?: string;
-  shortName?: string;
-  subtitle?: string;
-  status?: string;
-  team1?: any;
-  team2?: any;
-  venueinfo?: {
-    ground?: string;
-    city?: string;
-    country?: string;
-  };
-  venue?: string;
-  city?: string;
-  country?: string;
-}
+// Helper function to safely save match data with retry logic
+const saveMatchWithRetry = async (match: any) => {
+  let retries = 3;
+  while (retries > 0) {
+    try {
+      await match.save();
+      return;
+    } catch (error: any) {
+      if (error.name === 'VersionError' && retries > 1) {
+        console.log(`VersionError occurred during save, retrying... (${retries - 1} retries left)`);
+        retries--;
+        // Instead of reload(), we need to fetch the document again from the database
+        const freshMatch = await Match.findById(match._id);
+        if (freshMatch) {
+          // Copy the modified fields from the old document to the fresh one
+          Object.assign(freshMatch, match);
+          match = freshMatch;
+        }
+        // Wait a bit before retrying
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } else {
+        throw error;
+      }
+    }
+  }
+};
 
 // Function to sync detailed match data including scorecard
 export const syncMatchDetails = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-
+    
     const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
     const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
     const RAPIDAPI_MATCHES_INFO_URL = process.env.RAPIDAPI_MATCHES_INFO_URL;
@@ -146,23 +119,23 @@ export const syncMatchDetails = async (req: Request, res: Response) => {
 
     // First, check if we have recent data in the database
     const existingMatch = await Match.findOne({ matchId: id });
-
+    
     // If we have existing data, check if it's recent enough
     if (existingMatch) {
       const now = new Date();
       // Use get method to access timestamps or fallback to current time
       const lastUpdated = existingMatch.get('updatedAt') || existingMatch.get('createdAt') || new Date();
-
+      
       // For completed matches, we can use cached data for longer
       const isCompleted = existingMatch.status === 'COMPLETED' || existingMatch.status === 'ABANDONED' || existingMatch.status === 'CANCELLED';
-
+      
       // For live matches, refresh every 30 seconds
       // For upcoming matches, refresh every 5 minutes
       // For completed matches, refresh every 1 hour
       const refreshInterval = isCompleted ? 60 * 60 * 1000 : // 1 hour for completed
-        existingMatch.status === 'LIVE' ? 30 * 1000 : // 30 seconds for live
-          5 * 60 * 1000; // 5 minutes for upcoming
-
+                            existingMatch.status === 'LIVE' ? 30 * 1000 : // 30 seconds for live
+                            5 * 60 * 1000; // 5 minutes for upcoming
+      
       if ((now.getTime() - new Date(lastUpdated).getTime()) < refreshInterval) {
         console.log(`Using cached data for match ${id}, last updated: ${lastUpdated}`);
         return res.json({
@@ -183,29 +156,21 @@ export const syncMatchDetails = async (req: Request, res: Response) => {
     // Fetch scorecard
     const scorecard = await fetchScorecard(id, headers, RAPIDAPI_MATCHES_INFO_URL);
 
-    // Fetch historical scorecard (only if enabled)
-    const historicalScorecard = isFeatureEnabled('ENABLE_HISTORICAL_DATA')
-      ? await fetchHistoricalScorecard(id, headers, RAPIDAPI_MATCHES_INFO_URL)
-      : null;
+    // Fetch historical scorecard
+    const historicalScorecard = await fetchHistoricalScorecard(id, headers, RAPIDAPI_MATCHES_INFO_URL);
 
-    // Fetch commentary (only if enabled)
-    const commentary = isFeatureEnabled('ENABLE_MATCH_COMMENTARY')
-      ? await fetchCommentary(id, headers, RAPIDAPI_MATCHES_INFO_URL)
-      : null;
+    // Fetch commentary
+    const commentary = await fetchCommentary(id, headers, RAPIDAPI_MATCHES_INFO_URL);
 
-    // Fetch historical commentary (only if enabled)
-    const historicalCommentary = isFeatureEnabled('ENABLE_HISTORICAL_DATA')
-      ? await fetchHistoricalCommentary(id, headers, RAPIDAPI_MATCHES_INFO_URL)
-      : null;
+    // Fetch historical commentary
+    const historicalCommentary = await fetchHistoricalCommentary(id, headers, RAPIDAPI_MATCHES_INFO_URL);
 
-    // Fetch overs (only if enabled)
-    const overs = isFeatureEnabled('ENABLE_OVERS_DATA')
-      ? await fetchOvers(id, headers, RAPIDAPI_MATCHES_INFO_URL)
-      : null;
+    // Fetch overs
+    const overs = await fetchOvers(id, headers, RAPIDAPI_MATCHES_INFO_URL);
 
     // Process and store match data
     if (matchInfo) {
-      const m = matchInfo as ApiMatchData;
+      const m = matchInfo;
       const matchId = m.matchInfo?.matchId || m.matchId || m.id || m.match_id || id;
 
       // Parse teams data with scores
@@ -213,11 +178,10 @@ export const syncMatchDetails = async (req: Request, res: Response) => {
       // Check for team data in matchInfo first, then fall back to root level
       const team1Data = m.matchInfo?.team1 || m.team1;
       const team2Data = m.matchInfo?.team2 || m.team2;
-
+      
       if (team1Data) {
         const team1Score = extractTeamScore({ ...m, scorecard }, 'team1');
-        console.log('🏏 Team1 Data:', JSON.stringify(team1Data, null, 2));
-        console.log('🏏 Extracted team1 score:', JSON.stringify(team1Score, null, 2));
+        console.log('Extracted team1 score:', JSON.stringify(team1Score, null, 2));
         teams.push({
           teamId: team1Data.teamId?.toString() || team1Data.teamid?.toString() || '',
           teamName: team1Data.teamName || team1Data.teamname || 'Team 1',
@@ -225,11 +189,10 @@ export const syncMatchDetails = async (req: Request, res: Response) => {
           score: team1Score
         });
       }
-
+      
       if (team2Data) {
         const team2Score = extractTeamScore({ ...m, scorecard }, 'team2');
-        console.log('🏏 Team2 Data:', JSON.stringify(team2Data, null, 2));
-        console.log('🏏 Extracted team2 score:', JSON.stringify(team2Score, null, 2));
+        console.log('Extracted team2 score:', JSON.stringify(team2Score, null, 2));
         teams.push({
           teamId: team2Data.teamId?.toString() || team2Data.teamid?.toString() || '',
           teamName: team2Data.teamName || team2Data.teamname || 'Team 2',
@@ -238,13 +201,10 @@ export const syncMatchDetails = async (req: Request, res: Response) => {
         });
       }
 
-      // Debug: Log the final teams array
-      console.log('🏏 Final teams array:', JSON.stringify(teams, null, 2));
-
       // Determine the correct status based on match data
       const rawStatus = m.matchInfo?.state || m.status || 'UPCOMING';
       const mappedStatus = mapStatusToEnum(rawStatus);
-
+      
       // Check if match should be live based on time
       const currentTime = new Date();
       const matchStartTime = m.matchInfo?.startDate ? new Date(parseInt(m.matchInfo.startDate)) : null;
@@ -265,12 +225,12 @@ export const syncMatchDetails = async (req: Request, res: Response) => {
           finalStatus = existingMatch.status;
         }
       }
-
+      
       // Override with time-based logic if needed
       if (shouldBeLive) {
         finalStatus = 'LIVE';
       }
-
+      
       const isLive = finalStatus === 'LIVE';
 
       const doc: any = {
@@ -280,7 +240,7 @@ export const syncMatchDetails = async (req: Request, res: Response) => {
         subTitle: m.matchInfo?.seriesName || m.subtitle || '',
         format: m.matchInfo?.matchFormat || 'OTHER',
         status: finalStatus,
-        venue: {
+        venue: { 
           name: m.matchInfo?.venueInfo?.ground || m.venueinfo?.ground || m.venue || 'Unknown Venue',
           city: m.matchInfo?.venueInfo?.city || m.venueinfo?.city || m.city || '',
           country: m.matchInfo?.venueInfo?.country || m.venueinfo?.country || m.country || ''
@@ -345,7 +305,7 @@ export const syncMatchDetails = async (req: Request, res: Response) => {
       );
 
       console.log(`Successfully synced match ${id} with detailed data`);
-
+      
       return res.json({
         message: `Successfully synced match ${id} with detailed data`,
         match: updatedMatch,
@@ -360,15 +320,15 @@ export const syncMatchDetails = async (req: Request, res: Response) => {
     res.status(404).json({ message: 'No match data found' });
   } catch (error) {
     console.error('syncMatchDetails error:', error);
-
+    
     // Handle rate limiting
     if ((error as any)?.response?.status === 429) {
-      return res.status(429).json({
-        message: 'API rate limit exceeded. Please try again later.',
-        error: 'Too many requests'
+      return res.status(429).json({ 
+        message: 'API rate limit exceeded. Please try again later.', 
+        error: 'Too many requests' 
       });
     }
-
+    
     res.status(500).json({ message: 'Failed to sync match details', error: (error as Error).message });
   }
 };
@@ -377,13 +337,13 @@ export const syncMatchDetails = async (req: Request, res: Response) => {
 export const syncMultipleMatchDetails = async (req: Request, res: Response) => {
   try {
     const { matchIds } = req.body;
-
+    
     if (!matchIds || !Array.isArray(matchIds)) {
       return res.status(400).json({ message: 'matchIds array is required' });
     }
 
     const results = [];
-
+    
     for (const matchId of matchIds) {
       try {
         // Create a proper mock request object for syncMatchDetails
@@ -392,25 +352,25 @@ export const syncMultipleMatchDetails = async (req: Request, res: Response) => {
           query: {},
           body: {},
           headers: {},
-          get: () => undefined,
-          header: () => undefined,
+          get: (name: string) => undefined,
+          header: (name: string) => undefined,
         } as unknown as Request;
-
-        let result: any = null;
-
+        
+        let result = null;
+        
         // Create a mock response object to capture the result
         const mockRes = {
-          json: (data: any) => { result = data; return mockRes; },
-          status: (code: number) => ({
-            json: (data: any) => { result = { status: code, ...data }; return mockRes; },
-            send: (data: any) => { result = { status: code, ...data }; return mockRes; }
+          json: (data: any) => { result = data; },
+          status: (code: number) => ({ 
+            json: (data: any) => { result = { status: code, ...data }; },
+            send: (data: any) => { result = { status: code, ...data }; }
           }),
-          send: (data: any) => { result = data; return mockRes; }
-        } as unknown as Response;
+          send: (data: any) => { result = data; }
+        } as Response;
 
         await syncMatchDetails(mockReq, mockRes);
         results.push({ matchId, result });
-
+        
         // Add delay to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 1000));
       } catch (error) {

@@ -1,43 +1,11 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getLiveMatches = void 0;
 const Match_1 = __importDefault(require("../../models/Match"));
+const axios_1 = __importDefault(require("axios"));
 const matchLiveHelpers_1 = require("./matchLiveHelpers");
 // Helper function to map API status to our enum values
 const mapStatusToEnum = (status) => {
@@ -46,21 +14,21 @@ const mapStatusToEnum = (status) => {
     // Convert to lowercase for case-insensitive comparison
     const lowerStatus = status.toLowerCase();
     // Map COMPLETED status patterns (check this first to avoid misclassification)
+    // Be very strict about completed matches
     if (lowerStatus.includes('complete') ||
         lowerStatus.includes('finished') ||
         lowerStatus.includes('won by') ||
         lowerStatus.includes('match tied') ||
         lowerStatus.includes('no result') ||
-        lowerStatus.includes('result') ||
-        lowerStatus === 'completed' ||
-        lowerStatus === 'finished' ||
-        lowerStatus.includes('won') ||
+        lowerStatus.includes(' won') || // Space before "won" to catch "AUSW won", "IND won" etc
         lowerStatus.includes('lost') ||
         lowerStatus.includes('draw') ||
-        lowerStatus.includes('tied')) {
+        lowerStatus.includes('tied') ||
+        lowerStatus.includes('lead by') || // Test matches that are completed
+        lowerStatus.includes('trail by')) { // Test matches that are completed
         return 'COMPLETED';
     }
-    // Map LIVE status patterns
+    // Map LIVE status patterns - be more specific
     if (lowerStatus.includes('live') ||
         lowerStatus.includes('in progress') ||
         lowerStatus.includes('innings break') ||
@@ -68,19 +36,18 @@ const mapStatusToEnum = (status) => {
         lowerStatus.includes('tea break') ||
         lowerStatus.includes('lunch break') ||
         lowerStatus.includes('drinks break') ||
-        lowerStatus === 'live') {
+        lowerStatus.includes('day ') || // "Day 1", "Day 2" etc for Test matches
+        lowerStatus.includes('session')) { // "1st Session", "2nd Session" etc
         return 'LIVE';
     }
     // Map ABANDONED status patterns
     if (lowerStatus.includes('abandon') ||
-        lowerStatus.includes('washed out') ||
-        lowerStatus === 'abandoned') {
+        lowerStatus.includes('washed out')) {
         return 'ABANDONED';
     }
     // Map CANCELLED status patterns
     if (lowerStatus.includes('cancel') ||
-        lowerStatus.includes('postponed') ||
-        lowerStatus === 'cancelled') {
+        lowerStatus.includes('postponed')) {
         return 'CANCELLED';
     }
     // Map UPCOMING status patterns
@@ -89,14 +56,17 @@ const mapStatusToEnum = (status) => {
         lowerStatus.includes('upcoming') ||
         lowerStatus.includes('scheduled') ||
         lowerStatus.includes('preview') ||
-        lowerStatus === 'upcoming' ||
-        lowerStatus === 'scheduled') {
+        lowerStatus.includes('opt to bat') || // Toss result means upcoming
+        lowerStatus.includes('opt to bowl') ||
+        lowerStatus.match(/\d{1,2}:\d{2}/) || // Time format means upcoming
+        lowerStatus.includes('gmt') ||
+        lowerStatus.includes('ist')) {
         return 'UPCOMING';
     }
-    // If we can't determine the status, try to make an educated guess
-    // Check if it contains time information (likely upcoming)
-    if (lowerStatus.match(/\d{1,2}:\d{2}/) || lowerStatus.includes('gmt') || lowerStatus.includes('ist')) {
-        return 'UPCOMING';
+    // Default: if we can't determine, check the raw status string
+    // If it looks like a result (contains team names and "won"), it's completed
+    if (status.match(/\b(won|lost|draw|tied)\b/i)) {
+        return 'COMPLETED';
     }
     // Default fallback for live endpoint
     return 'LIVE';
@@ -108,20 +78,17 @@ const getLiveMatches = async (req, res) => {
         const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
         const RAPIDAPI_MATCHES_LIVE_URL = process.env.RAPIDAPI_MATCHES_LIVE_URL;
         const RAPIDAPI_MATCHES_INFO_URL = process.env.RAPIDAPI_MATCHES_INFO_URL;
-        // Import feature flags
-        const { isFeatureEnabled } = await Promise.resolve().then(() => __importStar(require('../../config/apiConfig')));
-        // If API key is available and feature is enabled, try to fetch from API first
-        if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_LIVE_URL && isFeatureEnabled('ENABLE_LIVE_MATCHES_API')) {
+        // If API key is available, try to fetch from API first
+        if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_LIVE_URL) {
             try {
                 console.log('Fetching live matches from API');
                 const headers = {
                     'x-rapidapi-key': RAPIDAPI_KEY,
                     'x-rapidapi-host': RAPIDAPI_HOST
                 };
-                const { rapidApiRateLimiter } = await Promise.resolve().then(() => __importStar(require('../../utils/rateLimiter')));
-                const response = await rapidApiRateLimiter.makeRequest(RAPIDAPI_MATCHES_LIVE_URL, { headers });
+                const response = await axios_1.default.get(RAPIDAPI_MATCHES_LIVE_URL, { headers, timeout: 15000 });
                 // Process API response and save to database
-                if (response && response.typeMatches) {
+                if (response.data && response.data.typeMatches) {
                     console.log('Available match types:', response.data.typeMatches.map((t) => t.matchType));
                     const liveMatchesData = response.data.typeMatches.find((type) => type.matchType === 'Live Matches');
                     // Also check for matches that should be live based on time
@@ -282,51 +249,30 @@ const getLiveMatches = async (req, res) => {
                             Object.keys(doc).forEach((k) => doc[k] === undefined && delete doc[k]);
                             return Match_1.default.findOneAndUpdate({ matchId: safeMatchId }, { $set: { ...doc, matchId: safeMatchId } }, { upsert: true, new: true, setDefaultsOnInsert: true });
                         });
-                        // Process and return fresh API data directly
+                        // Filter out null results and execute valid upserts
                         const validUpserts = upsertPromises.filter(promise => promise !== null);
-                        const freshMatches = await Promise.all(validUpserts);
-                        console.log(`Processed ${freshMatches.length} valid matches from API`);
-                        // Return from database after saving
+                        await Promise.all(validUpserts);
+                        console.log(`Saved ${validUpserts.length} valid matches out of ${upsertPromises.length} total`);
+                        // Return from database after saving - with stricter filtering
                         const liveMatches = await Match_1.default.find({
                             $and: [
                                 {
+                                    // Must have LIVE status
+                                    status: 'LIVE'
+                                },
+                                {
+                                    // Exclude matches with completed state in raw data
                                     $or: [
-                                        { isLive: true },
-                                        { status: 'LIVE' },
-                                        { status: { $regex: 'live', $options: 'i' } },
-                                        { status: { $regex: 'in progress', $options: 'i' } },
-                                        { status: { $regex: 'innings break', $options: 'i' } },
-                                        { status: { $regex: 'rain delay', $options: 'i' } },
-                                        { status: { $regex: 'tea break', $options: 'i' } },
-                                        { status: { $regex: 'lunch break', $options: 'i' } },
-                                        { status: { $regex: 'drinks break', $options: 'i' } }
+                                        { 'raw.state': { $exists: false } },
+                                        { 'raw.state': { $not: { $regex: 'complete|finished|won|lost|draw|tied|lead by|trail by', $options: 'i' } } }
                                     ]
                                 },
                                 {
-                                    // Exclude completed, abandoned, and cancelled matches
-                                    status: {
-                                        $nin: [
-                                            'COMPLETED', 'Complete', 'COMPLETE', 'Completed',
-                                            'ABANDONED', 'Abandoned', 'ABANDON', 'Abandon',
-                                            'CANCELLED', 'Cancelled', 'CANCEL', 'Cancel',
-                                            'UPCOMING', 'Upcoming', 'SCHEDULED', 'Scheduled',
-                                            // Add more completed status patterns
-                                            'Finished', 'FINISHED',
-                                            'Won', 'WON', 'Win', 'WIN',
-                                            'Lost', 'LOST', 'Loss', 'LOSS',
-                                            'Draw', 'DRAW', 'Drawn', 'DRAWN',
-                                            'Tied', 'TIED', 'Tie', 'TIE',
-                                            'No Result', 'NO RESULT', 'No result', 'no result',
-                                            'Result', 'RESULT'
-                                        ]
-                                    }
-                                },
-                                {
-                                    // Exclude matches that ended more than 24 hours ago
+                                    // Exclude matches that ended more than 6 hours ago
                                     $or: [
                                         { endDate: { $exists: false } },
                                         { endDate: null },
-                                        { endDate: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } }
+                                        { endDate: { $gte: new Date(Date.now() - 6 * 60 * 60 * 1000) } }
                                     ]
                                 }
                             ]
@@ -334,7 +280,7 @@ const getLiveMatches = async (req, res) => {
                             .sort({ priority: -1, startDate: -1 })
                             .select('matchId title shortTitle teams venue series status commentary currentlyPlaying isLive format startDate endDate raw scorecard');
                         // Process matches to extract data from raw field if needed and update scores from scorecard
-                        const updatedMatches = await Promise.all(liveMatches.map(async (match) => {
+                        const processedMatches = await Promise.all(liveMatches.map(async (match) => {
                             var _a;
                             console.log(`Processing match ${match.matchId}: status="${match.status}", isLive=${match.isLive}, startDate=${match.startDate}`);
                             // Check if match should be live based on time
@@ -375,9 +321,8 @@ const getLiveMatches = async (req, res) => {
                                     };
                                     // Try to fetch match scorecard from Cricbuzz API
                                     const url = `${RAPIDAPI_MATCHES_INFO_URL}/${match.matchId}/scard`;
-                                    const { rapidApiRateLimiter } = await Promise.resolve().then(() => __importStar(require('../../utils/rateLimiter')));
-                                    const scorecardResponse = await rapidApiRateLimiter.makeRequest(url, { headers });
-                                    if (scorecardResponse) {
+                                    const scorecardResponse = await axios_1.default.get(url, { headers, timeout: 10000 });
+                                    if (scorecardResponse.data) {
                                         console.log(`Scorecard fetched for match ${match.matchId}`);
                                         // Map status to valid enum value before saving
                                         let updatedStatus = match.status;
@@ -389,14 +334,14 @@ const getLiveMatches = async (req, res) => {
                                         }
                                         // Store scorecard data in database
                                         const updateData = {
-                                            scorecard: scorecardResponse,
+                                            scorecard: scorecardResponse.data,
                                             status: updatedStatus,
                                             isLive: updatedStatus === 'LIVE'
                                         };
                                         const updatedMatch = await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, { $set: updateData }, { new: true });
                                         if (updatedMatch) {
                                             // Extract scores from scorecard
-                                            const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(scorecardResponse);
+                                            const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(scorecardResponse.data);
                                             // Update team scores
                                             if (updatedMatch.teams && updatedMatch.teams.length >= 2) {
                                                 updatedMatch.teams[0].score = team1Score;
@@ -410,12 +355,10 @@ const getLiveMatches = async (req, res) => {
                                                     console.error(`Error saving updated scores for match ${match.matchId}:`, saveError);
                                                     // If save fails, try to update just the teams
                                                     try {
-                                                        await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, {
-                                                            $set: {
+                                                        await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, { $set: {
                                                                 "teams.0.score": team1Score,
                                                                 "teams.1.score": team2Score
-                                                            }
-                                                        }, { new: true });
+                                                            } }, { new: true });
                                                         console.log(`Updated scores via findOneAndUpdate for match ${match.matchId}: Team1=${team1Score.runs}/${team1Score.wickets}, Team2=${team2Score.runs}/${team2Score.wickets}`);
                                                     }
                                                     catch (updateError) {
@@ -445,8 +388,8 @@ const getLiveMatches = async (req, res) => {
                             }
                             return processedMatch;
                         }));
-                        console.log(`Found ${updatedMatches.length} live matches from database`);
-                        return res.json(updatedMatches);
+                        console.log(`Found ${processedMatches.length} live matches from database`);
+                        return res.json(processedMatches);
                     }
                 }
             }
@@ -455,47 +398,26 @@ const getLiveMatches = async (req, res) => {
                 // Continue to fallback logic
             }
         }
-        // Get live matches from database with updated scores
+        // Get live matches from database with updated scores - with stricter filtering
         const liveMatches = await Match_1.default.find({
             $and: [
                 {
+                    // Must have LIVE status
+                    status: 'LIVE'
+                },
+                {
+                    // Exclude matches with completed state in raw data
                     $or: [
-                        { isLive: true },
-                        { status: 'LIVE' },
-                        { status: { $regex: 'live', $options: 'i' } },
-                        { status: { $regex: 'in progress', $options: 'i' } },
-                        { status: { $regex: 'innings break', $options: 'i' } },
-                        { status: { $regex: 'rain delay', $options: 'i' } },
-                        { status: { $regex: 'tea break', $options: 'i' } },
-                        { status: { $regex: 'lunch break', $options: 'i' } },
-                        { status: { $regex: 'drinks break', $options: 'i' } }
+                        { 'raw.state': { $exists: false } },
+                        { 'raw.state': { $not: { $regex: 'complete|finished|won|lost|draw|tied|lead by|trail by', $options: 'i' } } }
                     ]
                 },
                 {
-                    // Exclude completed, abandoned, and cancelled matches
-                    status: {
-                        $nin: [
-                            'COMPLETED', 'Complete', 'COMPLETE', 'Completed',
-                            'ABANDONED', 'Abandoned', 'ABANDON', 'Abandon',
-                            'CANCELLED', 'Cancelled', 'CANCEL', 'Cancel',
-                            'UPCOMING', 'Upcoming', 'SCHEDULED', 'Scheduled',
-                            // Add more completed status patterns
-                            'Finished', 'FINISHED', 'Finished', 'FINISHED',
-                            'Won', 'WON', 'Win', 'WIN',
-                            'Lost', 'LOST', 'Loss', 'LOSS',
-                            'Draw', 'DRAW', 'Drawn', 'DRAWN',
-                            'Tied', 'TIED', 'Tie', 'TIE',
-                            'No Result', 'NO RESULT', 'No result', 'no result',
-                            'Result', 'RESULT'
-                        ]
-                    }
-                },
-                {
-                    // Exclude matches that ended more than 48 hours ago
+                    // Exclude matches that ended more than 6 hours ago
                     $or: [
                         { endDate: { $exists: false } },
                         { endDate: null },
-                        { endDate: { $gte: new Date(Date.now() - 48 * 60 * 60 * 1000) } }
+                        { endDate: { $gte: new Date(Date.now() - 6 * 60 * 60 * 1000) } }
                     ]
                 }
             ]
@@ -521,7 +443,7 @@ const getLiveMatches = async (req, res) => {
             return !isDuplicate;
         });
         // Process matches to extract data from raw field if needed and update scores from scorecard
-        const finalMatches = await Promise.all(deduplicatedMatches.map(async (match) => {
+        const processedMatches = await Promise.all(deduplicatedMatches.map(async (match) => {
             var _a;
             console.log(`Processing match ${match.matchId}: status="${match.status}", isLive=${match.isLive}, startDate=${match.startDate}, endDate=${match.endDate}`);
             // Check if match should be live based on time
@@ -562,9 +484,8 @@ const getLiveMatches = async (req, res) => {
                     };
                     // Try to fetch match scorecard from Cricbuzz API
                     const url = `${RAPIDAPI_MATCHES_INFO_URL}/${match.matchId}/scard`;
-                    const { rapidApiRateLimiter } = await Promise.resolve().then(() => __importStar(require('../../utils/rateLimiter')));
-                    const scorecardResponse = await rapidApiRateLimiter.makeRequest(url, { headers });
-                    if (scorecardResponse) {
+                    const scorecardResponse = await axios_1.default.get(url, { headers, timeout: 10000 });
+                    if (scorecardResponse.data) {
                         console.log(`Scorecard fetched for match ${match.matchId}`);
                         // Map status to valid enum value before saving
                         let updatedStatus = match.status;
@@ -576,14 +497,14 @@ const getLiveMatches = async (req, res) => {
                         }
                         // Store scorecard data in database
                         const updateData = {
-                            scorecard: scorecardResponse,
+                            scorecard: scorecardResponse.data,
                             status: updatedStatus,
                             isLive: updatedStatus === 'LIVE'
                         };
                         const updatedMatch = await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, { $set: updateData }, { new: true });
                         if (updatedMatch) {
                             // Extract scores from scorecard
-                            const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(scorecardResponse);
+                            const { team1Score, team2Score } = (0, matchLiveHelpers_1.extractScoresFromScorecard)(scorecardResponse.data);
                             // Update team scores
                             if (updatedMatch.teams && updatedMatch.teams.length >= 2) {
                                 updatedMatch.teams[0].score = team1Score;
@@ -597,12 +518,10 @@ const getLiveMatches = async (req, res) => {
                                     console.error(`Error saving updated scores for match ${match.matchId}:`, saveError);
                                     // If save fails, try to update just the teams
                                     try {
-                                        await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, {
-                                            $set: {
+                                        await Match_1.default.findOneAndUpdate({ matchId: match.matchId }, { $set: {
                                                 "teams.0.score": team1Score,
                                                 "teams.1.score": team2Score
-                                            }
-                                        }, { new: true });
+                                            } }, { new: true });
                                         console.log(`Updated scores via findOneAndUpdate for match ${match.matchId}: Team1=${team1Score.runs}/${team1Score.wickets}, Team2=${team2Score.runs}/${team2Score.wickets}`);
                                     }
                                     catch (updateError) {
@@ -633,7 +552,7 @@ const getLiveMatches = async (req, res) => {
             return processedMatch;
         }));
         // Filter out matches that have actually ended
-        const actuallyLiveMatches = finalMatches.filter(match => {
+        const actuallyLiveMatches = processedMatches.filter(match => {
             var _a, _b, _c, _d;
             // Check if match has ended more than 48 hours ago
             if (match.endDate && match.endDate < new Date(Date.now() - 48 * 60 * 60 * 1000)) {
@@ -669,7 +588,7 @@ const getLiveMatches = async (req, res) => {
             }
             return true;
         });
-        console.log(`Found ${actuallyLiveMatches.length} actually live matches from database (filtered from ${finalMatches.length})`);
+        console.log(`Found ${actuallyLiveMatches.length} actually live matches from database (filtered from ${processedMatches.length})`);
         return res.json(actuallyLiveMatches);
     }
     catch (error) {

@@ -2,62 +2,15 @@ import Series from '../../models/Series';
 import { Request, Response } from 'express';
 import axios from 'axios';
 
-// Helper function to update series status based on current date
-const updateSeriesStatus = (series: any) => {
-  const now = new Date();
-  const startDate = new Date(series.startDate);
-  const endDate = new Date(series.endDate);
-  
-  let status = 'UPCOMING';
-  
-  if (now >= startDate && now <= endDate) {
-    status = 'ONGOING';
-  } else if (now > endDate) {
-    status = 'COMPLETED';
-  }
-  
-  // Update the series object
-  series.status = status;
-  
-  // Also update isActive based on status
-  series.isActive = status === 'ONGOING';
-  
-  return series;
-};
-
 // Function to get all series - first check database, then API if needed
 export const getAllSeries = async (req: Request, res: Response) => {
   try {
     // First, try to get series from database
     const seriesFromDB = await Series.find({}).sort({ startDate: -1 }).limit(100);
     
-    // If we have series in the database, update their status and return them
+    // If we have series in the database, return them
     if (seriesFromDB && seriesFromDB.length > 0) {
-      // Update status for each series based on current date
-      const updatedSeries = seriesFromDB.map(series => {
-        const seriesObj = series.toObject();
-        return updateSeriesStatus(seriesObj);
-      });
-      
-      // Optionally, update the database with new statuses (bulk update)
-      const bulkOps = updatedSeries.map(series => ({
-        updateOne: {
-          filter: { seriesId: series.seriesId },
-          update: { 
-            $set: { 
-              status: series.status, 
-              isActive: series.isActive 
-            } 
-          }
-        }
-      }));
-      
-      // Execute bulk update in background (don't wait for it)
-      Series.bulkWrite(bulkOps).catch(err => 
-        console.error('Background series status update failed:', err)
-      );
-      
-      return res.json(updatedSeries);
+      return res.json(seriesFromDB);
     }
     
     // If no series in database, we would normally fetch from API
@@ -77,25 +30,9 @@ export const getSeriesById = async (req: Request, res: Response) => {
     // First, try to get series from database
     const seriesFromDB = await Series.findOne({ seriesId: id });
     
-    // If we have the series in the database, update its status and return it
+    // If we have the series in the database, return it
     if (seriesFromDB) {
-      const seriesObj = seriesFromDB.toObject();
-      const updatedSeries = updateSeriesStatus(seriesObj);
-      
-      // Update the database with new status in background
-      Series.updateOne(
-        { seriesId: id },
-        { 
-          $set: { 
-            status: updatedSeries.status, 
-            isActive: updatedSeries.isActive 
-          } 
-        }
-      ).catch(err => 
-        console.error('Background series status update failed:', err)
-      );
-      
-      return res.json(updatedSeries);
+      return res.json(seriesFromDB);
     }
     
     // If series not in database, return 404

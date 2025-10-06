@@ -1,4 +1,5 @@
-// Match detail helper functions
+import axios from 'axios';
+import Match from '../../models/Match';
 
 // Helper function to extract team scores from match data
 export function extractTeamScore(matchData: any, teamKey: string) {
@@ -12,117 +13,41 @@ export function extractTeamScore(matchData: any, teamKey: string) {
   };
 
   try {
-    console.log(`🔍 Extracting score for ${teamKey}:`, JSON.stringify(matchData.scorecard, null, 2));
-    
     // For completed matches, extract scores from the scorecard data
     if (matchData.scorecard?.scorecard && matchData.scorecard.scorecard.length > 0) {
       const scorecard = matchData.scorecard.scorecard;
-      console.log(`📊 Scorecard data for ${teamKey}:`, JSON.stringify(scorecard, null, 2));
-
-      // Try to find the correct innings for this team
-      let targetInnings = null;
       
-      // Let's properly match teams to innings by looking at the actual data
-      // Instead of guessing, let's use the team names to match correctly
-      
-      const team1Name = matchData.matchInfo?.team1?.teamname || matchData.matchInfo?.team1?.teamName || '';
-      const team2Name = matchData.matchInfo?.team2?.teamname || matchData.matchInfo?.team2?.teamName || '';
-      const currentTeamName = teamKey === 'team1' ? team1Name : team2Name;
-      
-      console.log(`🔍 Looking for ${teamKey} (${currentTeamName}) in ${scorecard.length} innings`);
-      console.log(`🏏 Team1: ${team1Name}, Team2: ${team2Name}`);
-      
-      // Look through all innings to find the one that matches this team
-      for (let i = 0; i < scorecard.length; i++) {
-        const innings = scorecard[i];
-        const battingTeamName = innings.batteamname || innings.batTeamName || '';
-        const runs = innings.score || innings.runs || innings.totalRuns || innings.totalruns || 0;
-        const wickets = innings.wickets || innings.totalWickets || innings.totalwickets || 0;
-        const overs = innings.overs || innings.totalOvers || innings.totalovers || 0;
-        
-        console.log(`📊 Innings ${i + 1} (ID: ${innings.inningsid}):`, {
-          battingTeam: battingTeamName,
-          runs: runs,
-          wickets: wickets,
-          overs: overs
-        });
-        
-        // Match by team name instead of innings position
-        // This is more reliable than assuming innings order
-        if (battingTeamName) {
-          const lowerBattingTeam = battingTeamName.toLowerCase();
-          const lowerCurrentTeam = currentTeamName.toLowerCase();
-          
-          // First try exact team name matching
-          if (lowerCurrentTeam && lowerBattingTeam.includes(lowerCurrentTeam)) {
-            targetInnings = innings;
-            console.log(`✅ Matched ${teamKey} (${currentTeamName}) to innings with batting team: ${battingTeamName}`);
-            break;
-          }
-          
-          // Fallback to common team name patterns
-          if (teamKey === 'team1') {
-            if (lowerBattingTeam.includes('india') || lowerBattingTeam.includes('ind')) {
-              targetInnings = innings;
-              console.log(`✅ Matched ${teamKey} (India pattern) to innings with batting team: ${battingTeamName}`);
-              break;
-            }
-          }
-          
-          if (teamKey === 'team2') {
-            if (lowerBattingTeam.includes('west indies') || lowerBattingTeam.includes('wi')) {
-              targetInnings = innings;
-              console.log(`✅ Matched ${teamKey} (West Indies pattern) to innings with batting team: ${battingTeamName}`);
-              break;
-            }
-          }
-        }
+      // Team 1 is typically the first innings (index 0)
+      // Team 2 is typically the second innings (index 1)
+      let inningsIndex = 0;
+      if (teamKey === 'team2') {
+        inningsIndex = 1;
       }
       
-      // Fallback: if no match found, use simple index
-      if (!targetInnings) {
-        console.log(`⚠️ No innings match found, using fallback`);
-        const inningsIndex = teamKey === 'team1' ? 0 : 1;
-        if (scorecard.length > inningsIndex) {
-          targetInnings = scorecard[inningsIndex];
-        }
-      }
-
-      if (targetInnings) {
-        console.log(`🎯 Using innings data for ${teamKey}:`, JSON.stringify(targetInnings, null, 2));
+      // Make sure we have the innings data
+      if (scorecard.length > inningsIndex) {
+        const innings = scorecard[inningsIndex];
         
-        // Try to extract from batTeamDetails first
-        if (targetInnings.batTeamDetails) {
-          const batDetails = targetInnings.batTeamDetails;
-          return {
-            runs: batDetails.runs || batDetails.totalRuns || batDetails.score || 0,
-            wickets: batDetails.wickets || batDetails.totalWickets || batDetails.wkts || 0,
-            overs: batDetails.overs || batDetails.totalOvers || 0,
-            balls: batDetails.balls || batDetails.totalBalls || 0,
-            runRate: batDetails.runRate || batDetails.rr || 0,
-            requiredRunRate: batDetails.requiredRunRate || batDetails.rrr || 0
-          };
-        }
+        // Handle different possible scorecard structures
+        // Try various field names for runs, wickets, overs
+        const runs = innings.totalRuns || innings.totalruns || innings.runs || innings.score || 0;
+        const wickets = innings.totalWickets || innings.totalwickets || innings.wickets || innings.wkts || 0;
+        const overs = innings.totalOvers || innings.totalovers || innings.overs || 0;
         
-        // Fallback to direct innings data
-        const runs = targetInnings.score || targetInnings.totalRuns || targetInnings.totalruns || targetInnings.runs || 0;
-        const wickets = targetInnings.wickets || targetInnings.totalWickets || targetInnings.totalwickets || targetInnings.wkts || 0;
-        const overs = targetInnings.overs || targetInnings.totalOvers || targetInnings.totalovers || 0;
-
         return {
           runs: runs,
           wickets: wickets,
           overs: overs,
-          balls: targetInnings.balls || targetInnings.totalballs || 0,
-          runRate: targetInnings.runRate || targetInnings.runrate || 0,
-          requiredRunRate: targetInnings.requiredRunRate || targetInnings.requiredrunrate || 0
+          balls: innings.balls || innings.totalballs || 0,
+          runRate: innings.runRate || innings.runrate || 0,
+          requiredRunRate: innings.requiredRunRate || innings.requiredrunrate || 0
         };
       }
     }
 
     // Try multiple locations for matchScore data (fallback for live matches)
     const matchScore = matchData.matchScore || matchData.score || matchData.scr || null;
-
+    
     if (!matchScore) {
       // Try to get score from matchInfo if available
       if (matchData.matchInfo?.score) {
@@ -141,7 +66,7 @@ export function extractTeamScore(matchData: any, teamKey: string) {
 
     const teamScoreKey = `${teamKey}Score`;
     const teamScore = matchScore[teamScoreKey] || matchScore[teamKey];
-
+    
     if (!teamScore) {
       // Try to get score directly from matchScore if it's not nested
       if (teamKey === 'team1' && (matchScore.t1s || matchScore.team1Score)) {
@@ -203,60 +128,78 @@ export function extractTeamScore(matchData: any, teamKey: string) {
 
 // Function to fetch match info data
 export async function fetchMatchInfo(id: string, headers: any, RAPIDAPI_MATCHES_INFO_URL: string | undefined) {
-  if (!RAPIDAPI_MATCHES_INFO_URL) return null;
-
-  const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
-  const infoUrl = `${RAPIDAPI_MATCHES_INFO_URL}/${id}`;
-
-  return await rapidApiRateLimiter.makeRequest(infoUrl, { headers });
+  try {
+    const infoUrl = `${RAPIDAPI_MATCHES_INFO_URL}/${id}`;
+    console.log('Fetching match info from:', infoUrl);
+    const infoResponse = await axios.get(infoUrl, { headers, timeout: 15000 });
+    return infoResponse.data;
+  } catch (error) {
+    console.error('Failed to fetch match info:', error);
+    return null;
+  }
 }
 
 // Function to fetch scorecard data
 export async function fetchScorecard(id: string, headers: any, RAPIDAPI_MATCHES_INFO_URL: string | undefined) {
-  if (!RAPIDAPI_MATCHES_INFO_URL) return null;
-
-  const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
-  const scorecardUrl = `${RAPIDAPI_MATCHES_INFO_URL}/${id}/scard`;
-
-  return await rapidApiRateLimiter.makeRequest(scorecardUrl, { headers });
+  try {
+    const scorecardUrl = `${RAPIDAPI_MATCHES_INFO_URL}/${id}/scard`;
+    console.log('Fetching scorecard from:', scorecardUrl);
+    const scorecardResponse = await axios.get(scorecardUrl, { headers, timeout: 15000 });
+    return scorecardResponse.data;
+  } catch (error) {
+    console.error('Failed to fetch scorecard:', error);
+    return null;
+  }
 }
 
 // Function to fetch historical scorecard data
 export async function fetchHistoricalScorecard(id: string, headers: any, RAPIDAPI_MATCHES_INFO_URL: string | undefined) {
-  if (!RAPIDAPI_MATCHES_INFO_URL) return null;
-
-  const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
-  const hscorecardUrl = `${RAPIDAPI_MATCHES_INFO_URL}/${id}/hscard`;
-
-  return await rapidApiRateLimiter.makeRequest(hscorecardUrl, { headers });
+  try {
+    const hscorecardUrl = `${RAPIDAPI_MATCHES_INFO_URL}/${id}/hscard`;
+    console.log('Fetching historical scorecard from:', hscorecardUrl);
+    const hscorecardResponse = await axios.get(hscorecardUrl, { headers, timeout: 15000 });
+    return hscorecardResponse.data;
+  } catch (error) {
+    console.error('Failed to fetch historical scorecard:', error);
+    return null;
+  }
 }
 
 // Function to fetch commentary data
 export async function fetchCommentary(id: string, headers: any, RAPIDAPI_MATCHES_INFO_URL: string | undefined) {
-  if (!RAPIDAPI_MATCHES_INFO_URL) return null;
-
-  const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
-  const commentaryUrl = `${RAPIDAPI_MATCHES_INFO_URL}/${id}/comm`;
-
-  return await rapidApiRateLimiter.makeRequest(commentaryUrl, { headers });
+  try {
+    const commentaryUrl = `${RAPIDAPI_MATCHES_INFO_URL}/${id}/comm`;
+    console.log('Fetching commentary from:', commentaryUrl);
+    const commentaryResponse = await axios.get(commentaryUrl, { headers, timeout: 15000 });
+    return commentaryResponse.data;
+  } catch (error) {
+    console.error('Failed to fetch commentary:', error);
+    return null;
+  }
 }
 
 // Function to fetch historical commentary data
 export async function fetchHistoricalCommentary(id: string, headers: any, RAPIDAPI_MATCHES_INFO_URL: string | undefined) {
-  if (!RAPIDAPI_MATCHES_INFO_URL) return null;
-
-  const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
-  const hcommentaryUrl = `${RAPIDAPI_MATCHES_INFO_URL}/${id}/hcomm`;
-
-  return await rapidApiRateLimiter.makeRequest(hcommentaryUrl, { headers });
+  try {
+    const hcommentaryUrl = `${RAPIDAPI_MATCHES_INFO_URL}/${id}/hcomm`;
+    console.log('Fetching historical commentary from:', hcommentaryUrl);
+    const hcommentaryResponse = await axios.get(hcommentaryUrl, { headers, timeout: 15000 });
+    return hcommentaryResponse.data;
+  } catch (error) {
+    console.error('Failed to fetch historical commentary:', error);
+    return null;
+  }
 }
 
 // Function to fetch overs data
 export async function fetchOvers(id: string, headers: any, RAPIDAPI_MATCHES_INFO_URL: string | undefined) {
-  if (!RAPIDAPI_MATCHES_INFO_URL) return null;
-
-  const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
-  const oversUrl = `${RAPIDAPI_MATCHES_INFO_URL}/${id}/overs`;
-
-  return await rapidApiRateLimiter.makeRequest(oversUrl, { headers });
+  try {
+    const oversUrl = `${RAPIDAPI_MATCHES_INFO_URL}/${id}/overs`;
+    console.log('Fetching overs from:', oversUrl);
+    const oversResponse = await axios.get(oversUrl, { headers, timeout: 15000 });
+    return oversResponse.data;
+  } catch (error) {
+    console.error('Failed to fetch overs:', error);
+    return null;
+  }
 }

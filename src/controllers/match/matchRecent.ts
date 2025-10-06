@@ -30,11 +30,8 @@ export const getRecentMatches = async (req: Request, res: Response) => {
     const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
     const RAPIDAPI_MATCHES_RECENT_URL = process.env.RAPIDAPI_MATCHES_RECENT_URL;
 
-    // Import feature flags
-    const { isFeatureEnabled } = await import('../../config/apiConfig');
-
-    // If API key is available and feature is enabled, try to fetch from API first
-    if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_RECENT_URL && isFeatureEnabled('ENABLE_RECENT_MATCHES_API')) {
+    // If API key is available, try to fetch from API first
+    if (RAPIDAPI_KEY && RAPIDAPI_HOST && RAPIDAPI_MATCHES_RECENT_URL) {
       try {
         console.log('Fetching recent matches from API');
         const headers = {
@@ -42,25 +39,21 @@ export const getRecentMatches = async (req: Request, res: Response) => {
           'x-rapidapi-host': RAPIDAPI_HOST
         };
 
-        const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
-        const response = await rapidApiRateLimiter.makeRequest(RAPIDAPI_MATCHES_RECENT_URL, { headers }) as any;
+        const response = await axios.get(RAPIDAPI_MATCHES_RECENT_URL, { headers, timeout: 15000 });
 
         // Process API response and save to database
-        if (response && response.typeMatches) {
-          // Process all match types (International, Domestic, Women) instead of looking for 'Recent Matches'
-          const allMatchTypes = response.typeMatches;
+        if (response.data && response.data.typeMatches) {
+          const recentMatchesData = response.data.typeMatches.find((type: any) => 
+            type.matchType === 'Recent Matches'
+          );
 
-          if (allMatchTypes && allMatchTypes.length > 0) {
+          if (recentMatchesData && recentMatchesData.seriesMatches) {
             const matchesList: any[] = [];
             
-            // Extract matches from all match types (International, Domestic, Women)
-            for (const matchType of allMatchTypes) {
-              if (matchType.seriesMatches) {
-                for (const seriesMatch of matchType.seriesMatches) {
-                  if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
-                    matchesList.push(...seriesMatch.seriesAdWrapper.matches);
-                  }
-                }
+            // Extract matches from series
+            for (const seriesMatch of recentMatchesData.seriesMatches) {
+              if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
+                matchesList.push(...seriesMatch.seriesAdWrapper.matches);
               }
             }
 

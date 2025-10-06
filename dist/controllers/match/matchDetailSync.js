@@ -6,7 +6,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.syncMultipleMatchDetails = exports.syncMatchDetails = void 0;
 const Match_1 = __importDefault(require("../../models/Match"));
 const matchDetailHelpers_1 = require("./matchDetailHelpers");
-const apiConfig_1 = require("../../config/apiConfig");
 // Helper function to map API status to our enum values
 const mapStatusToEnum = (status) => {
     if (!status)
@@ -65,6 +64,34 @@ const mapStatusToEnum = (status) => {
     // Default fallback
     return 'UPCOMING';
 };
+// Helper function to safely save match data with retry logic
+const saveMatchWithRetry = async (match) => {
+    let retries = 3;
+    while (retries > 0) {
+        try {
+            await match.save();
+            return;
+        }
+        catch (error) {
+            if (error.name === 'VersionError' && retries > 1) {
+                console.log(`VersionError occurred during save, retrying... (${retries - 1} retries left)`);
+                retries--;
+                // Instead of reload(), we need to fetch the document again from the database
+                const freshMatch = await Match_1.default.findById(match._id);
+                if (freshMatch) {
+                    // Copy the modified fields from the old document to the fresh one
+                    Object.assign(freshMatch, match);
+                    match = freshMatch;
+                }
+                // Wait a bit before retrying
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            else {
+                throw error;
+            }
+        }
+    }
+};
 // Function to sync detailed match data including scorecard
 const syncMatchDetails = async (req, res) => {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3;
@@ -115,22 +142,14 @@ const syncMatchDetails = async (req, res) => {
         const matchInfo = await (0, matchDetailHelpers_1.fetchMatchInfo)(id, headers, RAPIDAPI_MATCHES_INFO_URL);
         // Fetch scorecard
         const scorecard = await (0, matchDetailHelpers_1.fetchScorecard)(id, headers, RAPIDAPI_MATCHES_INFO_URL);
-        // Fetch historical scorecard (only if enabled)
-        const historicalScorecard = (0, apiConfig_1.isFeatureEnabled)('ENABLE_HISTORICAL_DATA')
-            ? await (0, matchDetailHelpers_1.fetchHistoricalScorecard)(id, headers, RAPIDAPI_MATCHES_INFO_URL)
-            : null;
-        // Fetch commentary (only if enabled)
-        const commentary = (0, apiConfig_1.isFeatureEnabled)('ENABLE_MATCH_COMMENTARY')
-            ? await (0, matchDetailHelpers_1.fetchCommentary)(id, headers, RAPIDAPI_MATCHES_INFO_URL)
-            : null;
-        // Fetch historical commentary (only if enabled)
-        const historicalCommentary = (0, apiConfig_1.isFeatureEnabled)('ENABLE_HISTORICAL_DATA')
-            ? await (0, matchDetailHelpers_1.fetchHistoricalCommentary)(id, headers, RAPIDAPI_MATCHES_INFO_URL)
-            : null;
-        // Fetch overs (only if enabled)
-        const overs = (0, apiConfig_1.isFeatureEnabled)('ENABLE_OVERS_DATA')
-            ? await (0, matchDetailHelpers_1.fetchOvers)(id, headers, RAPIDAPI_MATCHES_INFO_URL)
-            : null;
+        // Fetch historical scorecard
+        const historicalScorecard = await (0, matchDetailHelpers_1.fetchHistoricalScorecard)(id, headers, RAPIDAPI_MATCHES_INFO_URL);
+        // Fetch commentary
+        const commentary = await (0, matchDetailHelpers_1.fetchCommentary)(id, headers, RAPIDAPI_MATCHES_INFO_URL);
+        // Fetch historical commentary
+        const historicalCommentary = await (0, matchDetailHelpers_1.fetchHistoricalCommentary)(id, headers, RAPIDAPI_MATCHES_INFO_URL);
+        // Fetch overs
+        const overs = await (0, matchDetailHelpers_1.fetchOvers)(id, headers, RAPIDAPI_MATCHES_INFO_URL);
         // Process and store match data
         if (matchInfo) {
             const m = matchInfo;
@@ -142,8 +161,7 @@ const syncMatchDetails = async (req, res) => {
             const team2Data = ((_c = m.matchInfo) === null || _c === void 0 ? void 0 : _c.team2) || m.team2;
             if (team1Data) {
                 const team1Score = (0, matchDetailHelpers_1.extractTeamScore)({ ...m, scorecard }, 'team1');
-                console.log('🏏 Team1 Data:', JSON.stringify(team1Data, null, 2));
-                console.log('🏏 Extracted team1 score:', JSON.stringify(team1Score, null, 2));
+                console.log('Extracted team1 score:', JSON.stringify(team1Score, null, 2));
                 teams.push({
                     teamId: ((_d = team1Data.teamId) === null || _d === void 0 ? void 0 : _d.toString()) || ((_e = team1Data.teamid) === null || _e === void 0 ? void 0 : _e.toString()) || '',
                     teamName: team1Data.teamName || team1Data.teamname || 'Team 1',
@@ -153,8 +171,7 @@ const syncMatchDetails = async (req, res) => {
             }
             if (team2Data) {
                 const team2Score = (0, matchDetailHelpers_1.extractTeamScore)({ ...m, scorecard }, 'team2');
-                console.log('🏏 Team2 Data:', JSON.stringify(team2Data, null, 2));
-                console.log('🏏 Extracted team2 score:', JSON.stringify(team2Score, null, 2));
+                console.log('Extracted team2 score:', JSON.stringify(team2Score, null, 2));
                 teams.push({
                     teamId: ((_f = team2Data.teamId) === null || _f === void 0 ? void 0 : _f.toString()) || ((_g = team2Data.teamid) === null || _g === void 0 ? void 0 : _g.toString()) || '',
                     teamName: team2Data.teamName || team2Data.teamname || 'Team 2',
@@ -162,8 +179,6 @@ const syncMatchDetails = async (req, res) => {
                     score: team2Score
                 });
             }
-            // Debug: Log the final teams array
-            console.log('🏏 Final teams array:', JSON.stringify(teams, null, 2));
             // Determine the correct status based on match data
             const rawStatus = ((_h = m.matchInfo) === null || _h === void 0 ? void 0 : _h.state) || m.status || 'UPCOMING';
             const mappedStatus = mapStatusToEnum(rawStatus);
@@ -292,18 +307,18 @@ const syncMultipleMatchDetails = async (req, res) => {
                     query: {},
                     body: {},
                     headers: {},
-                    get: () => undefined,
-                    header: () => undefined,
+                    get: (name) => undefined,
+                    header: (name) => undefined,
                 };
                 let result = null;
                 // Create a mock response object to capture the result
                 const mockRes = {
-                    json: (data) => { result = data; return mockRes; },
+                    json: (data) => { result = data; },
                     status: (code) => ({
-                        json: (data) => { result = { status: code, ...data }; return mockRes; },
-                        send: (data) => { result = { status: code, ...data }; return mockRes; }
+                        json: (data) => { result = { status: code, ...data }; },
+                        send: (data) => { result = { status: code, ...data }; }
                     }),
-                    send: (data) => { result = data; return mockRes; }
+                    send: (data) => { result = data; }
                 };
                 await (0, exports.syncMatchDetails)(mockReq, mockRes);
                 results.push({ matchId, result });

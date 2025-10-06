@@ -81,12 +81,12 @@ export const updateSeriesData = async (req: Request, res: Response) => {
     if (RAPIDAPI_SERIES_MATCHES_URL) {
       try {
         const matchesUrl = RAPIDAPI_SERIES_MATCHES_URL.replace('3641', id);
-        const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
-        const matchesResponse = await rapidApiRateLimiter.makeRequest(matchesUrl, { headers });
+        console.log('Updating series schedule from:', matchesUrl);
+        const matchesResponse = await axios.get(matchesUrl, { headers, timeout: 15000 });
 
         let schedule: IScheduleMatch[] = [];
-        if (matchesResponse && matchesResponse.matchDetails) {
-          matchesResponse.matchDetails.forEach((matchDetail: any) => {
+        if (matchesResponse.data && matchesResponse.data.matchDetails) {
+          matchesResponse.data.matchDetails.forEach((matchDetail: any) => {
             if (matchDetail.matchDetailsMap && matchDetail.matchDetailsMap.match) {
               matchDetail.matchDetailsMap.match.forEach((match: any) => {
                 if (match.matchInfo) {
@@ -128,24 +128,24 @@ export const updateSeriesData = async (req: Request, res: Response) => {
     if (RAPIDAPI_SERIES_POINTS_TABLE_URL) {
       try {
         const pointsUrl = RAPIDAPI_SERIES_POINTS_TABLE_URL.replace('3718', id);
-        const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
-        const pointsResponse = await rapidApiRateLimiter.makeRequest(pointsUrl, { headers });
+        console.log('Updating points table from:', pointsUrl);
+        const pointsResponse = await axios.get(pointsUrl, { headers, timeout: 15000 });
 
         let pointsTable: IPointsTableTeam[] = [];
-        if (pointsResponse) {
+        if (pointsResponse.data) {
           // Try multiple possible response structures
           let tableData = null;
 
-          if (pointsResponse.pointsTable) {
-            if (Array.isArray(pointsResponse.pointsTable)) {
-              tableData = pointsResponse.pointsTable[0];
+          if (pointsResponse.data.pointsTable) {
+            if (Array.isArray(pointsResponse.data.pointsTable)) {
+              tableData = pointsResponse.data.pointsTable[0];
             } else {
-              tableData = pointsResponse.pointsTable;
+              tableData = pointsResponse.data.pointsTable;
             }
-          } else if (pointsResponse.table) {
-            tableData = pointsResponse.table;
-          } else if (pointsResponse.standings) {
-            tableData = pointsResponse.standings;
+          } else if (pointsResponse.data.table) {
+            tableData = pointsResponse.data.table;
+          } else if (pointsResponse.data.standings) {
+            tableData = pointsResponse.data.standings;
           }
 
           if (tableData) {
@@ -198,28 +198,28 @@ export const updateSeriesData = async (req: Request, res: Response) => {
       try {
         const baseUrl = RAPIDAPI_SERIES_SQUADS_URL.replace(/\/\d+\/squads$/, '');
         const squadsUrl = `${baseUrl}/${id}/squads`;
-        const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
-        const squadsResponse = await rapidApiRateLimiter.makeRequest(squadsUrl, { headers });
+        console.log('Updating squads from:', squadsUrl);
+        const squadsResponse = await axios.get(squadsUrl, { headers, timeout: 15000 });
 
         // Debug: Log the actual API response to see the real structure
-        console.log('🔍 SQUADS API RESPONSE:', JSON.stringify(squadsResponse, null, 2));
+        console.log('🔍 SQUADS API RESPONSE:', JSON.stringify(squadsResponse.data, null, 2));
 
         let squads: ISquad[] = [];
 
         // Try multiple possible response structures
         let squadData = null;
-        if (squadsResponse && squadsResponse.squads) {
-          console.log('✅ Found squads in response.squads');
-          squadData = squadsResponse.squads;
-        } else if (squadsResponse && Array.isArray(squadsResponse)) {
+        if (squadsResponse.data && squadsResponse.data.squads) {
+          console.log('✅ Found squads in response.data.squads');
+          squadData = squadsResponse.data.squads;
+        } else if (squadsResponse.data && Array.isArray(squadsResponse.data)) {
           console.log('✅ Found squads as direct array');
-          squadData = squadsResponse;
-        } else if (squadsResponse && squadsResponse.squad) {
-          console.log('✅ Found squads in response.squad');
-          squadData = squadsResponse.squad;
+          squadData = squadsResponse.data;
+        } else if (squadsResponse.data && squadsResponse.data.squad) {
+          console.log('✅ Found squads in response.data.squad');
+          squadData = squadsResponse.data.squad;
         } else {
           console.log('❌ No recognizable squad data structure found');
-          console.log('Available keys:', Object.keys(squadsResponse || {}));
+          console.log('Available keys:', Object.keys(squadsResponse.data || {}));
         }
 
         if (squadData && Array.isArray(squadData)) {
@@ -393,32 +393,24 @@ export const syncSeriesFromRapidAPI = async (req: Request, res: Response) => {
     };
 
     // Try to fetch series from Cricbuzz API
-    const { rapidApiRateLimiter } = await import('../../utils/rateLimiter');
-    const response = await rapidApiRateLimiter.makeRequest(RAPIDAPI_SERIES_LIST_URL, { headers });
-
-    if (!response) {
-      return res.status(429).json({
-        message: 'API rate limit exceeded or request failed. Please try again later.',
-        error: 'Too many requests or API unavailable'
-      });
-    }
+    const response = await axios.get(RAPIDAPI_SERIES_LIST_URL, { headers, timeout: 15000 });
 
     let seriesList: any[] = [];
 
     // Handle different response structures from RapidAPI
-    if (response && response.seriesMapProto) {
+    if (response.data && response.data.seriesMapProto) {
       // Extract series from seriesMapProto structure
-      for (const seriesProto of response.seriesMapProto) {
+      for (const seriesProto of response.data.seriesMapProto) {
         if (seriesProto.series && Array.isArray(seriesProto.series)) {
           seriesList.push(...seriesProto.series);
         }
       }
-    } else if (Array.isArray(response)) {
-      seriesList = response;
-    } else if (response && response.series) {
-      seriesList = response.series;
+    } else if (Array.isArray(response.data)) {
+      seriesList = response.data;
+    } else if (response.data.series) {
+      seriesList = response.data.series;
     } else {
-      const values = Object.values(response || {});
+      const values = Object.values(response.data || {});
       const arr = values.find((v: any) => Array.isArray(v) && v.length && typeof v[0] === 'object') as any[];
       if (arr) seriesList = arr;
     }
@@ -426,7 +418,7 @@ export const syncSeriesFromRapidAPI = async (req: Request, res: Response) => {
     if (!seriesList || !seriesList.length) {
       return res.status(500).json({
         message: 'No series array found in RapidAPI response. Inspect provider response.',
-        providerResponseSample: response
+        providerResponseSample: response.data
       });
     }
 
