@@ -111,14 +111,8 @@ export const getLiveMatches = async (req: Request, res: Response) => {
         if (response.data && response.data.typeMatches) {
           console.log('Available match types:', response.data.typeMatches.map((t: any) => t.matchType));
 
-          const liveMatchesData = response.data.typeMatches.find((type: any) =>
-            type.matchType === 'Live Matches'
-          );
-
-          // Also check for matches that should be live based on time
-          const allMatches: any[] = [];
-
           // Collect all matches from all categories
+          const allMatches: any[] = [];
           response.data.typeMatches.forEach((typeMatch: any) => {
             if (typeMatch.seriesMatches) {
               typeMatch.seriesMatches.forEach((seriesMatch: any) => {
@@ -131,37 +125,40 @@ export const getLiveMatches = async (req: Request, res: Response) => {
 
           console.log(`Found ${allMatches.length} total matches across all categories`);
 
-          const matchesList: any[] = [];
+          // Filter matches that are actually live based on state
+          const matchesList = allMatches.filter((match) => {
+            const state = match.matchInfo?.state || '';
+            const status = match.matchInfo?.status || '';
+            const lowerState = state.toLowerCase();
+            const lowerStatus = status.toLowerCase();
 
-          if (liveMatchesData && liveMatchesData.seriesMatches) {
-            // Extract matches from live matches category
-            for (const seriesMatch of liveMatchesData.seriesMatches) {
-              if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
-                matchesList.push(...seriesMatch.seriesAdWrapper.matches);
-              }
+            // Check if match is actually live
+            const isLive = lowerState === 'in progress' ||
+              lowerState === 'innings break' ||
+              lowerState === 'rain delay' ||
+              lowerState === 'tea break' ||
+              lowerState === 'lunch break' ||
+              lowerState === 'drinks break' ||
+              lowerState === 'toss' ||  // Toss just happened, match about to start
+              lowerState.includes('day ') ||  // Test match in progress
+              lowerStatus.includes('live') ||
+              lowerStatus.includes('in progress');
+
+            // Exclude completed matches
+            const isCompleted = lowerState === 'complete' ||
+              lowerState === 'finished' ||
+              lowerStatus.includes('won by') ||
+              lowerStatus.includes('match tied');
+
+            if (isLive && !isCompleted) {
+              console.log(`✅ Live match found: ${match.matchInfo?.matchId} - State: "${state}", Status: "${status}"`);
+              return true;
             }
-          }
 
-          // Also check all matches to find ones that should be live based on time
-          const currentTime = new Date();
-          const potentialLiveMatches = allMatches.filter((match) => {
-            const matchStartTime = match.matchInfo?.startDate ? new Date(parseInt(match.matchInfo.startDate)) : null;
-            const rawStatus = match.matchInfo?.status || match.matchInfo?.state || match.status || '';
-
-            // Check if match should be live based on time (started within last 8 hours)
-            const shouldBeLive = matchStartTime &&
-              matchStartTime <= currentTime &&
-              (currentTime.getTime() - matchStartTime.getTime()) < (8 * 60 * 60 * 1000); // 8 hours
-
-            if (shouldBeLive) {
-              console.log(`Potential live match found: ${match.matchInfo?.matchId} - Status: "${rawStatus}", Start: ${matchStartTime}`);
-            }
-
-            return shouldBeLive;
+            return false;
           });
 
-          // Add potential live matches to the list
-          matchesList.push(...potentialLiveMatches);
+          console.log(`Filtered to ${matchesList.length} actual live matches`);
 
           // Remove duplicates based on matchId
           const uniqueMatches = matchesList.filter((match, index, self) =>
@@ -201,18 +198,33 @@ export const getLiveMatches = async (req: Request, res: Response) => {
               const shortStatus = m.matchInfo?.shortStatus || m.shortStatus || '';
               
               // Check raw state first - it's more reliable than status
-              let status = mapStatusToEnum(rawStatus); // Use the mapping function
+              let status: 'UPCOMING' | 'LIVE' | 'COMPLETED' | 'ABANDONED' | 'CANCELLED' = 'LIVE';
               
               // Override based on raw state if it's more specific
               if (rawState) {
                 const lowerState = rawState.toLowerCase();
-                if (lowerState === 'preview' || lowerState === 'upcoming' || lowerState.includes('match starts')) {
+                
+                // LIVE states take priority
+                if (lowerState === 'in progress' || 
+                    lowerState === 'toss' || 
+                    lowerState === 'innings break' ||
+                    lowerState === 'rain delay' ||
+                    lowerState === 'tea break' ||
+                    lowerState === 'lunch break' ||
+                    lowerState === 'drinks break' ||
+                    lowerState.includes('day ')) {
+                  status = 'LIVE';
+                  console.log(`✅ Match ${safeMatchId}: rawState="${rawState}" indicates LIVE`);
+                } else if (lowerState === 'preview' || lowerState === 'upcoming' || lowerState.includes('match starts')) {
                   status = 'UPCOMING';
-                  console.log(`⚠️ Match ${matchId}: rawState="${rawState}" indicates UPCOMING, overriding status`);
+                  console.log(`⚠️ Match ${safeMatchId}: rawState="${rawState}" indicates UPCOMING, overriding status`);
                 } else if (lowerState === 'complete' || lowerState.includes('complete')) {
                   status = 'COMPLETED';
-                  console.log(`⚠️ Match ${matchId}: rawState="${rawState}" indicates COMPLETED`);
+                  console.log(`⚠️ Match ${safeMatchId}: rawState="${rawState}" indicates COMPLETED`);
                 }
+              } else {
+                // If no state, use the mapping function on status
+                status = mapStatusToEnum(rawStatus);
               }
               
               // Override status if shortStatus indicates completion
@@ -241,7 +253,7 @@ export const getLiveMatches = async (req: Request, res: Response) => {
                 }
               }
 
-              console.log(`Match ${matchId}: rawStatus="${rawStatus}" -> mappedStatus="${status}"`);
+              console.log(`Match ${safeMatchId}: rawStatus="${rawStatus}", rawState="${rawState}" -> mappedStatus="${status}"`);
 
               // Debug: Log available score data
               if (m.matchScore) {
@@ -301,21 +313,24 @@ export const getLiveMatches = async (req: Request, res: Response) => {
               // Validate essential match data before saving
               const hasValidTeams = team1Name !== 'Team 1' && team2Name !== 'Team 2' &&
                 team1Name.trim() !== '' && team2Name.trim() !== '';
-              const hasValidId = matchId && matchId.trim() !== '' && matchId !== 'undefined';
+              const hasValidId = safeMatchId && safeMatchId.trim() !== '' && safeMatchId !== 'undefined';
 
               if (!hasValidTeams || !hasValidId) {
-                console.log(`⚠️ Skipping match with invalid data: ID=${matchId}, Team1=${team1Name}, Team2=${team2Name}`);
+                console.log(`⚠️ Skipping match with invalid data: ID=${safeMatchId}, Team1=${team1Name}, Team2=${team2Name}`);
                 return null; // Skip this match
               }
               
-              // Skip completed and upcoming matches from being saved as live
+              // Skip completed matches from being saved as live
               if (status === 'COMPLETED') {
-                console.log(`⚠️ Skipping completed match: ID=${matchId}, Status=${status}`);
+                console.log(`⚠️ Skipping completed match: ID=${safeMatchId}, Status=${status}`);
                 return null; // Skip this match
               }
               
-              if (status === 'UPCOMING') {
-                console.log(`⚠️ Skipping upcoming match from live endpoint: ID=${matchId}, Status=${status}`);
+              // Only skip UPCOMING if the state is explicitly "Preview" or "Upcoming"
+              // Don't skip if state is "Toss" or "In Progress"
+              if (status === 'UPCOMING' && rawState && 
+                  (rawState.toLowerCase() === 'preview' || rawState.toLowerCase() === 'upcoming')) {
+                console.log(`⚠️ Skipping upcoming match from live endpoint: ID=${safeMatchId}, Status=${status}, State=${rawState}`);
                 return null; // Skip this match - it should be in upcoming, not live
               }
 

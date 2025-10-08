@@ -66,26 +66,48 @@ export const getUpcomingMatches = async (req: Request, res: Response) => {
         if (response.data && response.data.typeMatches) {
           console.log('Available match types:', response.data.typeMatches.map((t: any) => t.matchType));
           
-          const upcomingMatchesData = response.data.typeMatches.find((type: any) => 
-            type.matchType === 'Upcoming Matches'
-          );
-          
-          console.log('Found Upcoming Matches section:', !!upcomingMatchesData);
-
-          if (upcomingMatchesData && upcomingMatchesData.seriesMatches) {
-            console.log('Number of series with matches:', upcomingMatchesData.seriesMatches.length);
-            
-            const matchesList: any[] = [];
-            
-            // Extract matches from series
-            for (const seriesMatch of upcomingMatchesData.seriesMatches) {
-              if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
-                console.log(`Found ${seriesMatch.seriesAdWrapper.matches.length} matches in series`);
-                matchesList.push(...seriesMatch.seriesAdWrapper.matches);
-              }
+          // Collect all matches from all categories
+          const allMatches: any[] = [];
+          response.data.typeMatches.forEach((typeMatch: any) => {
+            if (typeMatch.seriesMatches) {
+              typeMatch.seriesMatches.forEach((seriesMatch: any) => {
+                if (seriesMatch.seriesAdWrapper && seriesMatch.seriesAdWrapper.matches) {
+                  allMatches.push(...seriesMatch.seriesAdWrapper.matches);
+                }
+              });
             }
-            
-            console.log(`Total matches extracted from API: ${matchesList.length}`);
+          });
+
+          console.log(`Found ${allMatches.length} total matches across all categories`);
+
+          // Filter matches that are actually upcoming based on state
+          const matchesList = allMatches.filter((match) => {
+            const state = match.matchInfo?.state || '';
+            const status = match.matchInfo?.status || '';
+            const lowerState = state.toLowerCase();
+            const lowerStatus = status.toLowerCase();
+
+            // Check if match is actually upcoming
+            const isUpcoming = lowerState === 'upcoming' ||
+              lowerState === 'preview' ||
+              lowerStatus.includes('match starts') ||
+              lowerStatus.includes('upcoming');
+
+            // Exclude live and completed matches
+            const isLive = lowerState === 'in progress' || lowerState === 'toss';
+            const isCompleted = lowerState === 'complete' || lowerStatus.includes('won by');
+
+            if (isUpcoming && !isLive && !isCompleted) {
+              console.log(`✅ Upcoming match found: ${match.matchInfo?.matchId} - State: "${state}", Status: "${status}"`);
+              return true;
+            }
+
+            return false;
+          });
+          
+          console.log(`Filtered to ${matchesList.length} actual upcoming matches`);
+
+          if (matchesList.length > 0) {
 
             // Process and save each match
             const upsertPromises = matchesList.map(async (m) => {
