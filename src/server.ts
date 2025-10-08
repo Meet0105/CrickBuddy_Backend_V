@@ -15,8 +15,17 @@ import photoRoutes from './routes/photos';
 dotenv.config({ path: __dirname + '/../.env' });
 
 const app = express();
+
+// CORS configuration - allow frontend URLs
+const allowedOrigins: string[] = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://crick-buddy-frontend-v.vercel.app',
+  process.env.FRONTEND_URL || ''
+].filter(origin => origin !== '');
+
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001'],
+  origin: allowedOrigins,
   credentials: true
 }));
 app.use(express.json({ limit: '2mb' }));
@@ -50,6 +59,13 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server listening on port ${PORT}`);
-});
+
+// Only start server if not in Vercel serverless environment
+if (process.env.VERCEL !== '1') {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server listening on port ${PORT}`);
+  });
+}
+
+// Export for Vercel serverless
+export default app;
