@@ -264,23 +264,45 @@ const getMatchById = async (req, res) => {
         // If match not in database and API key is available, try to fetch from API
         if (RAPIDAPI_KEY && RAPIDAPI_HOST) {
             try {
-                console.log('Match not in database, fetching from API');
-                // Try to fetch from API using match ID
-                const headers = {
-                    'x-rapidapi-key': RAPIDAPI_KEY,
-                    'x-rapidapi-host': RAPIDAPI_HOST
+                console.log('Match not in database, fetching from API for match ID:', id);
+                // Import the sync function to fetch and store the match
+                const { syncMatchDetails } = await Promise.resolve().then(() => __importStar(require('./matchDetailSync')));
+                // Create a mock request and response for syncMatchDetails
+                const mockReq = {
+                    params: { id },
+                    query: {},
+                    body: {},
+                    headers: {},
+                    get: (name) => undefined,
+                    header: (name) => undefined,
                 };
-                // We would need the proper endpoint for fetching match details by ID
-                // This is a placeholder - you would need to implement the actual API call
-                // based on the Cricbuzz API documentation
-                // For now, we'll just log and continue to return 404
-                console.log('API fetch for match by ID not fully implemented');
+                let syncResult = null;
+                const mockRes = {
+                    json: (data) => { syncResult = data; },
+                    status: (code) => ({
+                        json: (data) => { syncResult = { status: code, ...data }; return mockRes; },
+                        send: (data) => { syncResult = { status: code, ...data }; return mockRes; }
+                    }),
+                    send: (data) => { syncResult = data; return mockRes; }
+                };
+                // Call syncMatchDetails to fetch and store the match
+                await syncMatchDetails(mockReq, mockRes);
+                // If we got a result, return the match
+                if (syncResult && syncResult.match) {
+                    console.log('Successfully fetched and stored match from API');
+                    return res.json(syncResult.match);
+                }
+                else if (syncResult && syncResult.status === 404) {
+                    // Match truly doesn't exist
+                    return res.status(404).json({ message: 'Match not found in API' });
+                }
             }
             catch (apiError) {
                 console.error('API fetch failed for match by ID:', apiError);
+                // Continue to return 404 if API fetch fails
             }
         }
-        // If match not in database, return 404
+        // If match not in database and API fetch failed/unavailable, return 404
         res.status(404).json({ message: 'Match not found' });
     }
     catch (error) {

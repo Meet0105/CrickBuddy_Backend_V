@@ -22,29 +22,43 @@ export const getIccRankings = async (req: Request, res: Response) => {
     };
 
     // Try to fetch ICC rankings from Cricbuzz API
-    const url = `${RAPIDAPI_STATS_ICC_RANKINGS_URL}?formatType=${formatType}&category=${category}`;
+    // The URL structure is: /stats/v1/rankings/{category}?formatType={formatType}
+    // Replace the category in the URL path
+    let url = RAPIDAPI_STATS_ICC_RANKINGS_URL;
+
+    // Replace 'batsmen', 'bowlers', or 'allrounders' in the URL with the requested category
+    url = url.replace(/\/(batsmen|bowlers|allrounders)/, `/${category}`);
+
+    // Replace or add the formatType query parameter
+    if (url.includes('formatType=')) {
+      url = url.replace(/formatType=[^&]+/, `formatType=${formatType}`);
+    } else {
+      url = `${url}${url.includes('?') ? '&' : '?'}formatType=${formatType}`;
+    }
+
+    console.log(`Fetching ${category} rankings from: ${url}`);
     const response = await axios.get(url, { headers, timeout: 15000 });
 
     res.json(response.data);
   } catch (error) {
     console.error('getIccRankings error:', (error as any)?.response?.data || (error as Error).message || error);
-    
+
     // Handle rate limiting
     if ((error as any)?.response?.status === 429) {
-      return res.status(429).json({ 
-        message: 'API rate limit exceeded. Please try again later.', 
-        error: 'Too many requests' 
+      return res.status(429).json({
+        message: 'API rate limit exceeded. Please try again later.',
+        error: 'Too many requests'
       });
     }
-    
+
     // Handle subscription errors
     if ((error as any)?.response?.status === 403 || (error as any)?.response?.data?.message?.includes('subscribe')) {
-      return res.status(403).json({ 
-        message: 'API subscription required for rankings. Please check your API key.', 
-        error: 'Subscription required' 
+      return res.status(403).json({
+        message: 'API subscription required for rankings. Please check your API key.',
+        error: 'Subscription required'
       });
     }
-    
+
     res.status(500).json({ message: 'Failed to fetch ICC rankings', error: (error as any)?.response?.data || (error as Error).message });
   }
 };
@@ -72,10 +86,10 @@ export const getIccStandings = async (req: Request, res: Response) => {
     // Try to fetch ICC standings from Cricbuzz API
     // The URL in .env ends with /1 (Test), so we need to replace it with the actual matchType
     const url = RAPIDAPI_STATS_ICC_STANDINGS_URL.replace(/\/\d+$/, `/${matchType}`);
-    
+
     // Log the URL for debugging
     console.log(`Fetching standings from URL: ${url}`);
-    
+
     // For T20 (matchType 3), try with retry logic since it's known to be unstable
     if (matchType === '3') {
       let lastError;
@@ -91,49 +105,47 @@ export const getIccStandings = async (req: Request, res: Response) => {
         }
       }
       // If all retries failed, return the specific error for T20
-      return res.status(500).json({ 
-        message: 'T20 standings data is temporarily unavailable due to an issue with the external API. Please try Test (1) or ODI (2) match types instead.', 
+      return res.status(500).json({
+        message: 'T20 standings data is temporarily unavailable due to an issue with the external API. Please try Test (1) or ODI (2) match types instead.',
         error: 'API returned 500 Internal Server Error for T20 standings after multiple attempts'
       });
     }
-    
+
     // For Test and ODI, use direct approach
     const response = await axios.get(url, { headers, timeout: 15000 });
     res.json(response.data);
   } catch (error) {
     console.error('getIccStandings error:', (error as any)?.response?.data || (error as Error).message || error);
-    
+
     // Handle rate limiting
     if ((error as any)?.response?.status === 429) {
-      return res.status(429).json({ 
-        message: 'API rate limit exceeded. Please try again later.', 
-        error: 'Too many requests' 
+      return res.status(429).json({
+        message: 'API rate limit exceeded. Please try again later.',
+        error: 'Too many requests'
       });
     }
-    
+
     // Handle subscription errors
     if ((error as any)?.response?.status === 403 || (error as any)?.response?.data?.message?.includes('subscribe')) {
-      return res.status(403).json({ 
-        message: 'API subscription required for standings. Please check your API key.', 
-        error: 'Subscription required' 
+      return res.status(403).json({
+        message: 'API subscription required for standings. Please check your API key.',
+        error: 'Subscription required'
       });
     }
-    
+
     // Check if this is a specific API error for matchType 3 (T20)
     // T20 standings (matchType 3) returns 500 error from API - this is a known issue with the external API
     // Test (matchType 1) and ODI (matchType 2) standings are working correctly
     if (req.params?.matchType === '3') {
-      return res.status(500).json({ 
-        message: 'T20 standings data is temporarily unavailable due to an issue with the external API. Please try Test (1) or ODI (2) match types instead.', 
+      return res.status(500).json({
+        message: 'T20 standings data is temporarily unavailable due to an issue with the external API. Please try Test (1) or ODI (2) match types instead.',
         error: 'API returned 500 Internal Server Error for T20 standings'
       });
     }
-    
+
     res.status(500).json({ message: 'Failed to fetch ICC standings', error: (error as any)?.response?.data || (error as Error).message });
   }
 };
-
-
 
 export const getRankings = async (req: Request, res: Response) => {
   try {

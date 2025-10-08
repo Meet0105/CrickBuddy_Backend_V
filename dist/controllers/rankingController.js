@@ -24,7 +24,19 @@ const getIccRankings = async (req, res) => {
             'x-rapidapi-host': RAPIDAPI_HOST
         };
         // Try to fetch ICC rankings from Cricbuzz API
-        const url = `${RAPIDAPI_STATS_ICC_RANKINGS_URL}?formatType=${formatType}&category=${category}`;
+        // The URL structure is: /stats/v1/rankings/{category}?formatType={formatType}
+        // Replace the category in the URL path
+        let url = RAPIDAPI_STATS_ICC_RANKINGS_URL;
+        // Replace 'batsmen', 'bowlers', or 'allrounders' in the URL with the requested category
+        url = url.replace(/\/(batsmen|bowlers|allrounders)/, `/${category}`);
+        // Replace or add the formatType query parameter
+        if (url.includes('formatType=')) {
+            url = url.replace(/formatType=[^&]+/, `formatType=${formatType}`);
+        }
+        else {
+            url = `${url}${url.includes('?') ? '&' : '?'}formatType=${formatType}`;
+        }
+        console.log(`Fetching ${category} rankings from: ${url}`);
         const response = await axios_1.default.get(url, { headers, timeout: 15000 });
         res.json(response.data);
     }

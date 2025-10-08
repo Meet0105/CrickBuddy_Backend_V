@@ -46,14 +46,16 @@ const mapStatusToEnum = (status) => {
 };
 const getSeriesSchedule = async (req, res) => {
     var _a;
+    const { id } = req.params;
+    let seriesFromDB = null;
     try {
-        const { id } = req.params;
-        // Always fetch fresh data to ensure match statuses are up to date
-        // Check if we have cached data that's less than 1 hour old
-        const seriesFromDB = await Series_1.default.findOne({ seriesId: id });
+        // Check if we have cached data
+        seriesFromDB = await Series_1.default.findOne({ seriesId: id });
         const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-        if (seriesFromDB && seriesFromDB.schedule && seriesFromDB.schedule.length > 0 &&
-            seriesFromDB.updatedAt && seriesFromDB.updatedAt > oneHourAgo) {
+        const hasRecentCache = seriesFromDB && seriesFromDB.schedule && seriesFromDB.schedule.length > 0 &&
+            seriesFromDB.updatedAt && seriesFromDB.updatedAt > oneHourAgo;
+        // Return cached data if it's recent
+        if (hasRecentCache) {
             console.log('Returning recent schedule from database');
             return res.json({
                 schedule: seriesFromDB.schedule,
@@ -62,6 +64,8 @@ const getSeriesSchedule = async (req, res) => {
                 lastUpdated: seriesFromDB.updatedAt
             });
         }
+        // If we have old cached data, we'll try to refresh from API but fall back to cache if API fails
+        const hasOldCache = seriesFromDB && seriesFromDB.schedule && seriesFromDB.schedule.length > 0;
         const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
         const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
         const RAPIDAPI_SERIES_MATCHES_URL = process.env.RAPIDAPI_SERIES_MATCHES_URL;
@@ -123,6 +127,17 @@ const getSeriesSchedule = async (req, res) => {
     }
     catch (error) {
         console.error('getSeriesSchedule error:', error);
+        // If API fails but we have old cached data, return it
+        if (seriesFromDB && seriesFromDB.schedule && seriesFromDB.schedule.length > 0) {
+            console.log('API failed, returning old cached schedule from database');
+            return res.json({
+                schedule: seriesFromDB.schedule,
+                seriesName: seriesFromDB.name,
+                totalMatches: seriesFromDB.totalMatches,
+                lastUpdated: seriesFromDB.updatedAt || new Date(),
+                cached: true
+            });
+        }
         // Handle rate limiting
         if (((_a = error === null || error === void 0 ? void 0 : error.response) === null || _a === void 0 ? void 0 : _a.status) === 429) {
             return res.status(429).json({

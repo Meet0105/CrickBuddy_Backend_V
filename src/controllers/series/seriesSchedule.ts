@@ -62,16 +62,18 @@ const mapStatusToEnum = (status: string): 'UPCOMING' | 'LIVE' | 'COMPLETED' | 'A
 };
 
 export const getSeriesSchedule = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  let seriesFromDB: any = null;
+  
   try {
-    const { id } = req.params;
-
-    // Always fetch fresh data to ensure match statuses are up to date
-    // Check if we have cached data that's less than 1 hour old
-    const seriesFromDB = await Series.findOne({ seriesId: id });
+    // Check if we have cached data
+    seriesFromDB = await Series.findOne({ seriesId: id });
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const hasRecentCache = seriesFromDB && seriesFromDB.schedule && seriesFromDB.schedule.length > 0 &&
+      seriesFromDB.updatedAt && seriesFromDB.updatedAt > oneHourAgo;
 
-    if (seriesFromDB && seriesFromDB.schedule && seriesFromDB.schedule.length > 0 &&
-      seriesFromDB.updatedAt && seriesFromDB.updatedAt > oneHourAgo) {
+    // Return cached data if it's recent
+    if (hasRecentCache) {
       console.log('Returning recent schedule from database');
       return res.json({
         schedule: seriesFromDB.schedule,
@@ -80,6 +82,9 @@ export const getSeriesSchedule = async (req: Request, res: Response) => {
         lastUpdated: seriesFromDB.updatedAt
       });
     }
+    
+    // If we have old cached data, we'll try to refresh from API but fall back to cache if API fails
+    const hasOldCache = seriesFromDB && seriesFromDB.schedule && seriesFromDB.schedule.length > 0;
 
     const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
     const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST;
@@ -148,6 +153,18 @@ export const getSeriesSchedule = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('getSeriesSchedule error:', error);
+
+    // If API fails but we have old cached data, return it
+    if (seriesFromDB && seriesFromDB.schedule && seriesFromDB.schedule.length > 0) {
+      console.log('API failed, returning old cached schedule from database');
+      return res.json({
+        schedule: seriesFromDB.schedule,
+        seriesName: seriesFromDB.name,
+        totalMatches: seriesFromDB.totalMatches,
+        lastUpdated: seriesFromDB.updatedAt || new Date(),
+        cached: true
+      });
+    }
 
     // Handle rate limiting
     if ((error as any)?.response?.status === 429) {
